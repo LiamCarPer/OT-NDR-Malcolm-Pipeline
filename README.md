@@ -59,6 +59,21 @@ Using Arkime SPI Graphs, network connections are visualized to identify anomalou
 
 ---
 
+## Security Automation (DevSecOps)
+To streamline forensic workflows, this project includes a **DevSecOps automation layer**. The custom Python utility enables automated ingestion and validation of lab traffic into the Malcolm analysis engine.
+
+**Key Features:**
+- **Automated Ingestion**: Programmatic movement of PCAPs from the lab to the analysis stack.
+- **Data Validation**: Pre-ingestion checks to ensure file integrity and protocol compatibility.
+- **Pipeline Integration**: Designed to be triggered by network capture hooks or CI/CD pipelines.
+
+```bash
+# Example: Automated ingestion of all lab PCAPs
+python3 automation/malcolm_ingest.py --all
+```
+
+---
+
 ## Key Capabilities Demonstrated
 - **Deep Packet Inspection (DPI)**: Analysis of Modbus TCP function codes and register values to detect logic manipulation.
 - **Passive Asset Discovery**: Automated identification of PLCs, HMIs, and workstations without active scanning, preserving operational uptime.
@@ -69,6 +84,7 @@ Using Arkime SPI Graphs, network connections are visualized to identify anomalou
 ```bash
 OT-NDR-Malcolm-Pipeline/
 ├── README.md                           # Master project summary
+├── automation/                         # DevSecOps ingestion & validation scripts
 ├── pcaps/                              # Raw network traffic data (Baseline vs. Attack)
 ├── detection-engineering/              # Custom Suricata rules for Modbus
 ├── dashboards-and-visibility/          # Proof of SIEM/NDR visualization
@@ -84,7 +100,8 @@ The project includes a comprehensive Incident Report documenting a simulated set
 
 ## Tech Stack
 -   **NDR Framework:** CISA Malcolm
--   **IDS/IPS:** Suricata
--   **Forensics:** Arkime (formerly Moloch)
 -   **SIEM/Visualization:** OpenSearch / Dashboards
+-   **Forensics:** Arkime (Flow Visualization)
+-   **IDS:** Suricata (Custom OT Rulesets)
+-   **Automation:** Python 3.x
 -   **Protocols:** Modbus TCP (ICS/SCADA)
