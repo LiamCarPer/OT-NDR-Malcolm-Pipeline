@@ -6,8 +6,38 @@
 ## Objective
 To emulate the Continuous Threat Detection (CTD) and passive asset visibility of commercial platforms like Nozomi Networks and Claroty using open-source tools. This project demonstrates a production-grade pipeline for industrial network security, specifically focused on Deep Packet Inspection (DPI) of the Modbus TCP protocol within a Purdue-model environment.
 
-## Architecture
-The pipeline ingests raw network traffic (PCAPs) from a simulated Industrial Control System (ICS) environment.
+## Visual Architecture
+```mermaid
+graph LR
+    subgraph Lab [OT-Security-Lab]
+        direction TB
+        PLC[PLC - Siemens/Schneider]
+        HMI[Industrial HMI]
+    end
+
+    Traffic(PCAP / Port Mirroring)
+
+    subgraph Malcolm [CISA Malcolm Engine]
+        direction TB
+        Zeek[Zeek - Metadata Extraction]
+        Suricata[Suricata - IDS Alerts]
+    end
+
+    subgraph Analytics [Visibility & Analysis]
+        direction TB
+        OS[OpenSearch - SIEM]
+        Ark[Arkime - Flow Visualizer]
+    end
+
+    Lab --> Traffic
+    Traffic --> Malcolm
+    Zeek -->|Enriched Metadata| OS
+    Suricata -->|Security Alerts| Ark
+    Zeek -->|Session Data| Ark
+```
+
+## Architecture Overview
+The pipeline ingests raw network traffic (PCAPs) from a simulated Industrial Control System (ICS) environment, processing it through a multi-stage analysis stack:
 
 1.  **Traffic Capture:** Real-time capture of Modbus TCP traffic between HMIs and PLCs.
 2.  **Ingestion:** Automatic processing via **CISA Malcolm**.
