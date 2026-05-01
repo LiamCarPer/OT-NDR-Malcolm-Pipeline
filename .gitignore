@@ -1,0 +1,15 @@
+# System files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Large files / PCAPs (Optional)
+# If your PCAPs get > 50MB, uncomment the line below and use Git LFS
+# *.pcap
+
+# Temporary / Log files
+*.log
+*.tmp

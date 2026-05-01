@@ -1,0 +1,14 @@
+# Suricata Rules for Industrial Control Systems (ICS) Detection Engineering
+# Specifically targeting unauthorized Modbus TCP Write commands in the OT environment.
+
+# ALERT: Modbus Write Single Register (FC 6) from Unauthorized IP
+# This rule triggers when a Modbus Write Single Register command is detected from a source not in the authorized engineering workstation range.
+alert modbus any any -> 172.21.0.0/24 502 (msg:"ET OT MODBUS Unauthorized Write Single Register (FC 6)"; modbus: function 6; classtype:policy-violation; sid:1000001; rev:1;)
+
+# ALERT: Modbus Write Multiple Registers (FC 16) from Unauthorized IP
+# This rule triggers when a Modbus Write Multiple Registers command is detected, often used for setpoint modification or logic manipulation.
+alert modbus any any -> 172.21.0.0/24 502 (msg:"ET OT MODBUS Unauthorized Write Multiple Registers (FC 16)"; modbus: function 16; classtype:policy-violation; sid:1000002; rev:1;)
+
+# ALERT: Modbus Exception Response (Potential Malformed Request/Fuzzing)
+# Triggers on exception responses which could indicate scanning or unsuccessful exploitation attempts.
+alert modbus any 502 -> any any (msg:"ET OT MODBUS Exception Response Detected"; modbus: type response, function > 128; classtype:bad-unknown; sid:1000003; rev:1;)
