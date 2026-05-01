@@ -17,6 +17,18 @@ The pipeline ingests raw network traffic (PCAPs) from a simulated Industrial Con
 
 ---
 
+## Visual Proof of Pipeline Performance
+
+### Passive Asset Discovery (OpenSearch)
+Malcolm automatically identifies assets by analyzing traffic patterns. The dashboard below demonstrates the automated discovery and fingerprinting of PLC and HMI nodes within the OT environment.
+![Passive Asset Discovery](dashboards-and-visibility/passive_asset_discovery.png)
+
+### Lateral Movement Analysis (Arkime)
+Using Arkime SPI Graphs, network connections are visualized to identify anomalous traffic flows across Purdue levels. This visualization captures a lateral movement attack attempting to pivot from the operations network into the control zone.
+![Arkime Lateral Movement](dashboards-and-visibility/arkime_lateral_movement.png)
+
+---
+
 ## Key Capabilities Demonstrated
 - **Deep Packet Inspection (DPI)**: Analysis of Modbus TCP function codes and register values to detect logic manipulation.
 - **Passive Asset Discovery**: Automated identification of PLCs, HMIs, and workstations without active scanning, preserving operational uptime.
@@ -35,21 +47,12 @@ OT-NDR-Malcolm-Pipeline/
 
 ---
 
-## Visibility and Analytics
-### Passive Asset Discovery
-Malcolm automatically identifies assets by analyzing traffic patterns. Below is the dashboard showing the discovery of PLC and HMI nodes.
-![Passive Asset Discovery](dashboards-and-visibility/passive_asset_discovery.png)
-
-### Lateral Movement Analysis
-Using Arkime SPI Graphs, network connections are visualized to identify anomalous traffic flows across Purdue levels.
-![Arkime Lateral Movement](dashboards-and-visibility/arkime_lateral_movement.png)
-
 ## Incident Response and Threat Hunting
 The project includes a comprehensive Incident Report documenting a simulated setpoint manipulation attack. Findings are mapped to the MITRE ATT&CK ICS Matrix to provide a standardized view of the threat actor's tactics.
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 -   **NDR Framework:** CISA Malcolm
 -   **IDS/IPS:** Suricata
 -   **Forensics:** Arkime (formerly Moloch)
