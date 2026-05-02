@@ -9,6 +9,8 @@ import os
 import shutil
 import time
 import argparse
+import hashlib
+import json
 from datetime import datetime
 
 try:
@@ -26,6 +28,7 @@ MALCOLM_PCAP_DIR = os.environ.get("MALCOLM_PCAP_DIR", "/opt/Malcolm/pcap")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
 PROJECT_PCAP_DIR = os.path.join(PROJECT_DIR, "pcaps")
+AUDIT_LOG_PATH = os.path.join(SCRIPT_DIR, "ingest_audit.log")
 
 def log(message, level="INFO"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -48,6 +51,34 @@ def validate_pcap(file_path):
         
     return True
 
+def calculate_sha256(file_path):
+    """Calculates SHA-256 hash of a file for forensic integrity."""
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            # Read in chunks to avoid memory issues with large PCAPs
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
+    except Exception as e:
+        log(f"Hash calculation failed: {str(e)}", "ERROR")
+        return None
+
+def update_audit_log(file_name, sha256, status, size):
+    """Updates the forensic audit log with ingestion details."""
+    entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "file": file_name,
+        "sha256": sha256,
+        "size_bytes": size,
+        "status": status
+    }
+    try:
+        with open(AUDIT_LOG_PATH, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        log(f"Failed to update audit log: {str(e)}", "ERROR")
+
 def ingest_to_malcolm(file_name):
     """Copies the PCAP to Malcolm's monitored directory for processing."""
     src = os.path.join(PROJECT_PCAP_DIR, file_name)
@@ -56,14 +87,26 @@ def ingest_to_malcolm(file_name):
     if not validate_pcap(src):
         return False
     
+    file_size = os.path.getsize(src)
+    sha256 = calculate_sha256(src)
+    
+    if not sha256:
+        update_audit_log(file_name, "N/A", "FAILED (Hash Error)", file_size)
+        return False
+
     try:
         log(f"Starting ingestion for {file_name}...")
+        log(f"Forensic Hash (SHA-256): {sha256}")
         shutil.copy2(src, dst)
+        
         log(f"Successfully moved {file_name} to Malcolm ingestion engine.")
         log(f"Processing started. Check dashboards at https://localhost/dashboards")
+        
+        update_audit_log(file_name, sha256, "SUCCESS", file_size)
         return True
     except Exception as e:
         log(f"Failed to ingest {file_name}: {str(e)}", "ERROR")
+        update_audit_log(file_name, sha256, f"FAILED ({str(e)})", file_size)
         return False
 
 def main():

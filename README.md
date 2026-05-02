@@ -64,6 +64,7 @@ To streamline forensic workflows, this project includes a **DevSecOps automation
 
 **Key Features:**
 - **Automated Ingestion**: Programmatic movement of PCAPs from the lab to the analysis stack.
+- **Forensic Chain of Custody**: Automated SHA-256 hashing and persistent audit logging to ensure data integrity during ingestion.
 - **Data Validation**: Pre-ingestion checks to ensure file integrity and protocol compatibility.
 - **Pipeline Integration**: Designed to be triggered by network capture hooks or CI/CD pipelines.
 
