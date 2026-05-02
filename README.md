@@ -65,6 +65,7 @@ To streamline forensic workflows, this project includes a **DevSecOps automation
 **Key Features:**
 - **Automated Ingestion**: Programmatic movement of PCAPs from the lab to the analysis stack.
 - **Forensic Chain of Custody**: Automated SHA-256 hashing and persistent audit logging to ensure data integrity during ingestion.
+- **ICS-Aware DPI Profiling**: Deep Packet Inspection using `tshark` to analyze Modbus TCP function codes and identify high-risk industrial commands (Write/Control) before analysis.
 - **Data Validation**: Pre-ingestion checks to ensure file integrity and protocol compatibility.
 - **Pipeline Integration**: Designed to be triggered by network capture hooks or CI/CD pipelines.
 
@@ -73,6 +74,11 @@ To streamline forensic workflows, this project includes a **DevSecOps automation
 python3 automation/malcolm_ingest.py --all
 ```
 
+### Pipeline Execution (Visual Proof)
+The terminal demo below showcases the automated ingestion process, including forensic hashing, DPI profiling, and real-time detection of unauthorized Modbus control commands.
+
+![Pipeline Demo](assets/pipeline_demo.gif)
+
 ---
 
 ## Key Capabilities Demonstrated
@@ -80,12 +86,15 @@ python3 automation/malcolm_ingest.py --all
 - **Passive Asset Discovery**: Automated identification of PLCs, HMIs, and workstations without active scanning, preserving operational uptime.
 - **Detection Engineering**: Development of custom Suricata IDS rules to identify unauthorized ICS commands.
 - **Incident Response**: Forensic investigations aligned with NIST SP 800-61 and mapped to the MITRE ATT&CK for ICS matrix.
+- **Forensic Verification**: Implementation of SHA-256 chain-of-custody logging for all ingested network evidence.
 
 ## Repository Structure
 ```bash
 OT-NDR-Malcolm-Pipeline/
 ├── README.md                           # Master project summary
 ├── automation/                         # DevSecOps ingestion & validation scripts
+│   ├── malcolm_ingest.py               # Main automation utility
+│   └── ingest_audit.log                # Forensic chain-of-custody audit trail
 ├── pcaps/                              # Raw network traffic data (Baseline vs. Attack)
 ├── detection-engineering/              # Custom Suricata rules for Modbus
 ├── dashboards-and-visibility/          # Proof of SIEM/NDR visualization
