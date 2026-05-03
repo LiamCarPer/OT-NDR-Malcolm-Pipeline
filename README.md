@@ -59,25 +59,28 @@ Using Arkime SPI Graphs, network connections are visualized to identify anomalou
 
 ---
 
-## Security Automation (DevSecOps)
-To streamline forensic workflows, this project includes a **DevSecOps automation layer**. The custom Python utility enables automated ingestion and validation of lab traffic into the Malcolm analysis engine.
+## Security Orchestration (SOAR)
+To streamline forensic workflows, this project includes a **Python-based Security Orchestration (SOAR) layer**. This layer transforms raw ingestion into an automated incident response pipeline by enriching network alerts with asset context and generating forensic reports.
 
-**Key Features:**
+**Key Orchestration Features:**
 - **Automated Ingestion**: Programmatic movement of PCAPs from the lab to the analysis stack.
-- **Forensic Chain of Custody**: Automated SHA-256 hashing and persistent audit logging to ensure data integrity during ingestion.
-- **ICS-Aware DPI Profiling**: Deep Packet Inspection using `tshark` to analyze Modbus TCP function codes and identify high-risk industrial commands (Write/Control) before analysis.
-- **Data Validation**: Pre-ingestion checks to ensure file integrity and protocol compatibility.
-- **Pipeline Integration**: Designed to be triggered by network capture hooks or CI/CD pipelines.
+- **Asset Context Enrichment**: Automatically cross-references detected IPs against a JSON-based **Asset Inventory** to identify Purdue Level, asset type, and criticality.
+- **Automated Incident Reporting**: Dynamically generates NIST-aligned incident reports in Markdown format when high-risk Modbus commands (Writes) are detected.
+- **Forensic Chain of Custody**: Automated SHA-256 hashing and persistent audit logging to ensure data integrity.
+- **ICS-Aware DPI Profiling**: Pre-ingestion analysis using `tshark` to profile Modbus TCP function codes and detect baseline drift.
 
 ```bash
-# Example: Automated ingestion of all lab PCAPs
-python3 automation/malcolm_ingest.py --all
+# Example: Automated ingestion with orchestration trigger
+python3 automation/malcolm_ingest.py --file modbus_attack.pcap --trigger-alert
 ```
 
 ### Pipeline Execution (Visual Proof)
 The terminal demo below showcases the automated ingestion process, including forensic hashing, DPI profiling, and real-time detection of unauthorized Modbus control commands.
 
 ![Pipeline Demo](assets/pipeline_demo.gif)
+
+> [!TIP]
+> Use the `--trigger-alert` flag to simulate a Suricata rule firing and force the generation of a forensic incident report enriched with asset context.
 
 ---
 
@@ -92,13 +95,16 @@ The terminal demo below showcases the automated ingestion process, including for
 ```bash
 OT-NDR-Malcolm-Pipeline/
 ├── README.md                           # Master project summary
-├── automation/                         # DevSecOps ingestion & validation scripts
-│   ├── malcolm_ingest.py               # Main automation utility
+├── automation/                         # SOAR Orchestration layer
+│   ├── malcolm_ingest.py               # Main orchestration engine
+│   ├── asset_inventory.json            # OT Asset Database (IP mappings)
 │   └── ingest_audit.log                # Forensic chain-of-custody audit trail
 ├── pcaps/                              # Raw network traffic data (Baseline vs. Attack)
 ├── detection-engineering/              # Custom Suricata rules for Modbus
 ├── dashboards-and-visibility/          # Proof of SIEM/NDR visualization
-└── incident-response/                  # NIST-aligned forensic reporting & threat hunting
+└── incident-response/                  # NIST-aligned forensic reporting
+    ├── Incident_Report_Template.md     # Dynamic report template
+    └── MITRE_ICS_Threat_Hunt.md        # Tactical hunting guidance
 ```
 
 ---
