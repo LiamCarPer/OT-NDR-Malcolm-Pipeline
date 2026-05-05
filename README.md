@@ -64,14 +64,15 @@ To streamline forensic workflows, this project includes a **Python-based Securit
 
 **Key Orchestration Features:**
 - **Automated Ingestion**: Programmatic movement of PCAPs from the lab to the analysis stack.
+- **Privacy Sanitization**: Automated IP anonymization using `tcprewrite` to preserve data privacy during evidence movement.
 - **Asset Context Enrichment**: Automatically cross-references detected IPs against a JSON-based **Asset Inventory** to identify Purdue Level, asset type, and criticality.
-- **Automated Incident Reporting**: Dynamically generates NIST-aligned incident reports in Markdown format when high-risk Modbus commands (Writes) are detected.
-- **Forensic Chain of Custody**: Automated SHA-256 hashing and persistent audit logging to ensure data integrity.
-- **ICS-Aware DPI Profiling**: Pre-ingestion analysis using `tshark` to profile Modbus TCP function codes and detect baseline drift.
+- **Advanced DPI Profiling**: Pre-ingestion analysis using `tshark` to extract Modbus function codes and identify unauthorized register manipulation.
+- **Automated Incident Reporting**: Dynamically generates NIST-aligned incident reports mapped to the **MITRE ATT&CK for ICS** matrix.
+- **Forensic Chain of Custody**: Automated SHA-256 hashing and persistent audit logging.
 
 ```bash
-# Example: Automated ingestion with orchestration trigger
-python3 automation/malcolm_ingest.py --file modbus_attack.pcap --trigger-alert
+# Example: Automated ingestion with privacy sanitization
+python3 automation/malcolm_ingest.py --file modbus_attack.pcap --sanitize --trigger-alert
 ```
 
 ### Pipeline Execution (Visual Proof)
@@ -79,32 +80,34 @@ The terminal demo below showcases the automated ingestion process, including for
 
 ![Pipeline Demo](assets/pipeline_demo.gif)
 
-> [!TIP]
-> Use the `--trigger-alert` flag to simulate a Suricata rule firing and force the generation of a forensic incident report enriched with asset context.
+**Note:** Use the `--trigger-alert` flag to simulate a Suricata rule firing and force the generation of a forensic incident report enriched with asset context.
 
 ---
 
 ## Key Capabilities Demonstrated
 - **Deep Packet Inspection (DPI)**: Analysis of Modbus TCP function codes and register values to detect logic manipulation.
-- **Passive Asset Discovery**: Automated identification of PLCs, HMIs, and workstations without active scanning, preserving operational uptime.
-- **Detection Engineering**: Development of custom Suricata IDS rules to identify unauthorized ICS commands.
-- **Incident Response**: Forensic investigations aligned with NIST SP 800-61 and mapped to the MITRE ATT&CK for ICS matrix.
-- **Forensic Verification**: Implementation of SHA-256 chain-of-custody logging for all ingested network evidence.
+- **Passive Asset Discovery**: Automated identification of PLCs, HMIs, and workstations without active scanning.
+- **Detection Engineering**: Development of custom Suricata IDS rules for ICS command injection.
+- **Incident Response**: Forensic investigations aligned with NIST SP 800-61.
+- **Forensic Verification**: Implementation of SHA-256 chain-of-custody logging.
 
 ## Repository Structure
 ```bash
 OT-NDR-Malcolm-Pipeline/
+├── .github/workflows/                  # CI/CD Pipeline (GitHub Actions)
 ├── README.md                           # Master project summary
+├── CONTRIBUTING.md                     # Engineering contribution guidelines
 ├── automation/                         # SOAR Orchestration layer
 │   ├── malcolm_ingest.py               # Main orchestration engine
-│   ├── asset_inventory.json            # OT Asset Database (IP mappings)
-│   └── ingest_audit.log                # Forensic chain-of-custody audit trail
-├── pcaps/                              # Raw network traffic data (Baseline vs. Attack)
-├── detection-engineering/              # Custom Suricata rules for Modbus
-├── dashboards-and-visibility/          # Proof of SIEM/NDR visualization
+│   ├── Dockerfile                      # Containerized deployment
+│   ├── requirements.txt                # Python dependencies
+│   ├── asset_inventory.json            # OT Asset Database
+│   ├── ingest_audit.log                # Forensic audit trail
+│   └── tests/                          # Unit testing suite
+├── pcaps/                              # Raw network traffic data
+├── detection-engineering/              # Custom Suricata rules
+├── dashboards-and-visibility/          # SIEM/NDR visualization proof
 └── incident-response/                  # NIST-aligned forensic reporting
-    ├── Incident_Report_Template.md     # Dynamic report template
-    └── MITRE_ICS_Threat_Hunt.md        # Tactical hunting guidance
 ```
 
 ---
