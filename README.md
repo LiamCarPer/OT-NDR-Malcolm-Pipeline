@@ -87,7 +87,7 @@ The terminal demo below showcases the automated ingestion process, including for
 ## Key Capabilities Demonstrated
 - **Deep Packet Inspection (DPI)**: Analysis of Modbus TCP function codes and register values to detect logic manipulation.
 - **Passive Asset Discovery**: Automated identification of PLCs, HMIs, and workstations without active scanning.
-- **Detection Engineering**: Development of custom Suricata IDS rules for ICS command injection.
+- **Detection Engineering**: Consumes the validated ICS Suricata ruleset from [ot-detection-engineering](https://github.com/LiamCarPer/ot-detection-engineering).
 - **Incident Response**: Forensic investigations aligned with NIST SP 800-61.
 - **Forensic Verification**: Implementation of SHA-256 chain-of-custody logging.
 
@@ -105,7 +105,7 @@ OT-NDR-Malcolm-Pipeline/
 │   ├── ingest_audit.log                # Forensic audit trail
 │   └── tests/                          # Unit testing suite
 ├── pcaps/                              # Raw network traffic data
-├── detection-engineering/              # Custom Suricata rules
+├── detection-engineering/              # Suricata ruleset source and install notes
 ├── dashboards-and-visibility/          # SIEM/NDR visualization proof
 └── incident-response/                  # NIST-aligned forensic reporting
 ```

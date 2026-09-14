@@ -14,7 +14,7 @@ On May 1, 2026, the OT monitoring system (CISA Malcolm) flagged a high-severity 
 | :--- | :--- | :--- |
 | 11:38:00 | Baseline: Normal HMI polling observed (1220 packets). | System functioning normally. |
 | 12:25:10 | Discovery: Internal scan for Modbus (Port 502) targets. | Arkime SPI Graph identifies scanning. |
-| 12:26:05 | Exploitation: Modbus FC 6 (Write) sent to PLC-01 (172.21.0.10). | Suricata SID: 1000001 triggered. |
+| 12:26:05 | Exploitation: Modbus FC 6 (Write) sent to PLC-01 (172.21.0.10). | Suricata SID: 9000001 triggered. |
 | 14:23:45 | Detection: Security Analyst notified via OpenSearch Dashboard. | Triage initiated. |
 | 14:40:00 | Containment: Source IP isolated at the Level 3.5 Firewall. | Traffic blocked. |
 | 14:55:00 | Recovery: Setpoint verified and restored by OT Operations. | Incident closed. |
