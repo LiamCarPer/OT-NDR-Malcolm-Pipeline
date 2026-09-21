@@ -121,7 +121,8 @@ def render() -> tuple[list[Image.Image], list[int], int, int]:
 
         frames.append(image)
         hold = min(times[index + 1] - time, MAX_HOLD_SECONDS)
-        durations.append(max(int(hold * 100), 6))
+        # Pillow takes GIF frame durations in milliseconds.
+        durations.append(max(int(hold * 1000), 60))
 
     return frames, durations, size[0], size[1]
 
@@ -129,7 +130,7 @@ def render() -> tuple[list[Image.Image], list[int], int, int]:
 def main() -> None:
     """Write the GIF and MP4 next to the cast."""
     frames, durations, width, height = render()
-    print(f"{len(frames)} frames at {width}x{height}, {sum(durations) / 100:.1f}s")
+    print(f"{len(frames)} frames at {width}x{height}, {sum(durations) / 1000:.1f}s")
 
     frames[0].save(
         OUT_GIF,
@@ -148,7 +149,7 @@ def main() -> None:
     tmp.mkdir(parents=True)
     index = 0
     for image, duration in zip(frames, durations):
-        for _ in range(max(1, round(duration / 100 * MP4_FPS))):
+        for _ in range(max(1, round(duration / 1000 * MP4_FPS))):
             image.save(tmp / f"{index:05d}.png")
             index += 1
     subprocess.run(
