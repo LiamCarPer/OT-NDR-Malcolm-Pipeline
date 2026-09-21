@@ -53,9 +53,9 @@ control assets from the same source. It produced no IDS alert.
 
 | ID | Technique | Basis |
 | :--- | :--- | :--- |
-| T0888 | Remote System Discovery | Three control assets enumerated by one host in 14 seconds |
+| T0888 | Remote System Information Discovery | Three control assets enumerated by one host in 14 seconds |
 | T0836 | Modify Parameter | FC 6 write to a control asset |
-| T0855 | Unauthorized Command Message | Write to a setpoint-class register from a non-allowlisted writer |
+| T1692.001 | Command Message | Write to a setpoint-class register from a non-allowlisted writer |
 
 ### Forensic integrity
 

@@ -42,15 +42,16 @@ SETPOINT_REGISTER_FLOOR = 1000
 # ATT&CK for ICS techniques this DPI heuristic can assert, and the evidence
 # required for each one. Techniques are never hardcoded into a report: they are
 # derived from the observed operations, so a capture with no control writes
-# cannot claim a write technique.
+# cannot claim a write technique. IDs and names are validated against the pinned
+# ATT&CK for ICS catalog in ot-detection-engineering by the test suite.
 MITRE_TECHNIQUES = {
     "T0836": ("Modify Parameter", "Modbus write commands observed."),
-    "T0855": (
-        "Unauthorized Command Message",
+    "T1692.001": (
+        "Command Message",
         "Write to a setpoint-class register (>= 1000).",
     ),
     "T0888": (
-        "Remote System Discovery",
+        "Remote System Information Discovery",
         "Read-only requests fanning out across several control assets.",
     ),
 }
@@ -229,7 +230,7 @@ def analyze_pcap_dpi(file_path):
     if stats["writes"]:
         tags.append("T0836")
     if stats["critical_writes"]:
-        tags.append("T0855")
+        tags.append("T1692.001")
     if stats["reads"] and not stats["writes"] and len(stats["dst_ips"]) > 1:
         tags.append("T0888")
     stats["mitre_tags"] = tags

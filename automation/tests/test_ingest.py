@@ -23,6 +23,9 @@ import malcolm_ingest  # noqa: E402
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PCAPS_DIR = os.path.join(PROJECT_DIR, "pcaps")
 EVIDENCE_DIR = os.path.join(PROJECT_DIR, "detection-engineering", "evidence")
+ATTACK_ICS_CATALOG = os.path.join(
+    os.path.dirname(PROJECT_DIR), "ot-detection-engineering", "metadata", "attack_ics_catalog.json"
+)
 
 requires_tshark = pytest.mark.skipif(
     shutil.which("tshark") is None, reason="tshark is not installed"
@@ -42,7 +45,7 @@ def make_stats(**overrides):
         "writes": 1,
         "critical_writes": 1,
         "write_sources": ["172.24.0.10"],
-        "mitre_tags": ["T0836", "T0855"],
+        "mitre_tags": ["T0836", "T1692.001"],
     }
     stats.update(overrides)
     return stats
@@ -76,7 +79,7 @@ def test_analyze_pcap_dpi_basic(mock_run):
     assert stats["reads"] == 1
     assert stats["writes"] == 1
     assert stats["critical_writes"] == 1
-    assert stats["mitre_tags"] == ["T0836", "T0855"]
+    assert stats["mitre_tags"] == ["T0836", "T1692.001"]
 
 
 @patch("malcolm_ingest.subprocess.run")
@@ -166,7 +169,7 @@ def test_report_omits_write_techniques_when_no_writes(tmp_path):
 
     assert "T0888" in content
     assert "T0836" not in content
-    assert "T0855" not in content
+    assert "T1692.001" not in content
     assert "Write commands observed" not in content
 
 
@@ -334,7 +337,7 @@ def test_setpoint_write_capture_profile():
     assert stats["writes"] == 1
     assert stats["critical_writes"] == 1
     assert stats["write_sources"] == ["172.24.0.10"]
-    assert stats["mitre_tags"] == ["T0836", "T0855"]
+    assert stats["mitre_tags"] == ["T0836", "T1692.001"]
 
 
 def test_suricata_evidence_matches_committed_captures():
@@ -365,3 +368,28 @@ def test_asset_inventory_flags_control_writers():
     assert writers == {"172.21.0.20", "172.22.0.10"}
     assert inventory["172.24.0.10"]["control_writer"] is False
     assert all("zone" in asset for asset in inventory.values())
+
+
+@pytest.mark.skipif(
+    not os.path.exists(ATTACK_ICS_CATALOG),
+    reason="ot-detection-engineering checkout is not available",
+)
+def test_mitre_techniques_match_pinned_catalog():
+    """
+    Assert every asserted technique exists in the pinned ATT&CK for ICS catalog.
+
+    The name the report prints must match the catalog too. This is the guard that
+    catches a deprecated or renumbered technique: the pipeline used to assert
+    T0855, which was removed when the ICS techniques were restructured.
+    """
+    catalog = {
+        technique["id"]: technique["name"]
+        for technique in json.load(open(ATTACK_ICS_CATALOG))["techniques"]
+    }
+    assert catalog, "the pinned catalog is empty"
+
+    for technique, (name, _) in malcolm_ingest.MITRE_TECHNIQUES.items():
+        assert technique in catalog, f"{technique} is not in the pinned catalog"
+        assert catalog[technique] == name, (
+            f"{technique} is '{catalog[technique]}' in the catalog, not '{name}'"
+        )
