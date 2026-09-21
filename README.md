@@ -102,7 +102,7 @@ discovery, not fingerprinting — no vendor or model was identified.
 Arkime's SPI Graph shows the same traffic as connections between hosts. The
 graph below is the read-only fan-out from `172.24.0.10` to three control assets
 in fourteen seconds.
-![Arkime SPI Graph](dashboards-and-visibility/arkime_lateral_movement.png)
+![Arkime SPI Graph](dashboards-and-visibility/arkime_recon_fanout.png)
 
 **What it proves and what it does not:** it is a session visualisation of the
 committed capture. It is not stateful packet inspection, and the earlier
