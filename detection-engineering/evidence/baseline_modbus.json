@@ -1,0 +1,9 @@
+{
+  "capture": "baseline_modbus.pcap",
+  "capture_sha256": "41b1f9e383fabde7ace30faffa2133eb1be50c135f4bfb4e9cc98f387d8e788a",
+  "rules": "ot-detection.rules",
+  "rules_sha256": "717e3dcb5d9aaa82576df7f79a973958b45af05174bd3b1e5b46efd464d9e924",
+  "suricata_image": "jasonish/suricata:latest",
+  "alert_count": 0,
+  "alerts": []
+}

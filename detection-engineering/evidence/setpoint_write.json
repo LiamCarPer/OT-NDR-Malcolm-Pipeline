@@ -1,0 +1,15 @@
+{
+  "capture": "setpoint_write.pcap",
+  "capture_sha256": "b96455802c695f0f3d0c7adf2cdfed7ba2238ff778957537f0d3b6266ad85bff",
+  "rules": "ot-detection.rules",
+  "rules_sha256": "717e3dcb5d9aaa82576df7f79a973958b45af05174bd3b1e5b46efd464d9e924",
+  "suricata_image": "jasonish/suricata:latest",
+  "alert_count": 1,
+  "alerts": [
+    {
+      "sid": 9000001,
+      "signature": "OT Modbus Write Single Register From Unauthorized Control Writer",
+      "timestamp": "2026-05-01T10:32:00.020001+0000"
+    }
+  ]
+}

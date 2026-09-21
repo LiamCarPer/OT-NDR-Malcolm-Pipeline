@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-21T17:29:18Z", "file": "baseline_modbus.pcap", "sha256": "41b1f9e383fabde7ace30faffa2133eb1be50c135f4bfb4e9cc98f387d8e788a", "size_bytes": 92744, "status": "SUCCESS"}
+{"timestamp": "2026-09-21T17:29:19Z", "file": "modbus_recon_fanout.pcap", "sha256": "63757dc7299c454544bc31c86c177a0aae547d32f94d1ffffd38b3d28b0b2da3", "size_bytes": 2136, "status": "SUCCESS"}
+{"timestamp": "2026-09-21T17:29:19Z", "file": "setpoint_write.pcap", "sha256": "b96455802c695f0f3d0c7adf2cdfed7ba2238ff778957537f0d3b6266ad85bff", "size_bytes": 3078, "status": "SUCCESS"}

@@ -1,0 +1,9 @@
+{
+  "capture": "modbus_recon_fanout.pcap",
+  "capture_sha256": "63757dc7299c454544bc31c86c177a0aae547d32f94d1ffffd38b3d28b0b2da3",
+  "rules": "ot-detection.rules",
+  "rules_sha256": "717e3dcb5d9aaa82576df7f79a973958b45af05174bd3b1e5b46efd464d9e924",
+  "suricata_image": "jasonish/suricata:latest",
+  "alert_count": 0,
+  "alerts": []
+}

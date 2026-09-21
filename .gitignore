@@ -18,5 +18,6 @@ __pycache__/
 # Temporary / Log files
 *.log
 *.tmp
-# automation/ingest_audit.log is committed on purpose: it is the forensic
-# record, and it is tracked, so this rule does not apply to it.
+# The forensic audit log is evidence, not a log file to discard: it is committed
+# on purpose, so it is un-ignored here.
+!automation/ingest_audit.log
