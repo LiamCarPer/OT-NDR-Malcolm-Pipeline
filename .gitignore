@@ -6,6 +6,11 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Python build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Large files / PCAPs (Optional)
 # If your PCAPs get > 50MB, uncomment the line below and use Git LFS
 # *.pcap
@@ -13,3 +18,5 @@ Thumbs.db
 # Temporary / Log files
 *.log
 *.tmp
+# automation/ingest_audit.log is committed on purpose: it is the forensic
+# record, and it is tracked, so this rule does not apply to it.

@@ -1,0 +1,13 @@
+[flake8]
+# CI installs plain flake8, so only the built-in checks run there. The limit is
+# 100 columns rather than 79 to keep the f-strings and log messages readable.
+max-line-length = 100
+# Q000, I100 and I201 come from optional plugins that CI does not install. They
+# are ignored so a local run with those plugins matches CI: this repository uses
+# double quotes deliberately, and the test import order is forced by the
+# sys.path append above it.
+extend-ignore = E203, W503, Q000, I100, I201
+exclude =
+    .git,
+    __pycache__,
+    .venv

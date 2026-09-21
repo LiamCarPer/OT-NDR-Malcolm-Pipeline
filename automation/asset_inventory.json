@@ -4,34 +4,55 @@
     "zone": "Purdue Level 1 (Control Zone)",
     "type": "Programmable Logic Controller",
     "criticality": "High",
-    "owner": "OT Operations Team"
+    "owner": "OT Operations Team",
+    "control_writer": false
   },
   "172.21.0.11": {
     "name": "Pressure Sensor (SEN-01)",
     "zone": "Purdue Level 1 (Control Zone)",
     "type": "Modbus I/O Module",
     "criticality": "High",
-    "owner": "OT Operations Team"
+    "owner": "OT Operations Team",
+    "control_writer": false
   },
   "172.21.0.12": {
     "name": "Flow Meter (SEN-02)",
     "zone": "Purdue Level 1 (Control Zone)",
     "type": "Modbus I/O Module",
     "criticality": "Medium",
-    "owner": "OT Operations Team"
+    "owner": "OT Operations Team",
+    "control_writer": false
+  },
+  "172.21.0.20": {
+    "name": "HMI Control Interface (HMI-02)",
+    "zone": "Purdue Level 2 (Supervisory Zone)",
+    "type": "Human Machine Interface",
+    "criticality": "High",
+    "owner": "OT Operations Team",
+    "control_writer": true
+  },
+  "172.22.0.10": {
+    "name": "HMI Supervisory Interface (HMI-03)",
+    "zone": "Purdue Level 2 (Supervisory Zone)",
+    "type": "Human Machine Interface",
+    "criticality": "High",
+    "owner": "Engineering Team",
+    "control_writer": true
   },
   "172.24.0.10": {
     "name": "Engineering HMI (HMI-01)",
     "zone": "Purdue Level 2 (Supervisory Zone)",
     "type": "Human Machine Interface",
     "criticality": "Medium",
-    "owner": "Engineering Team"
+    "owner": "Engineering Team",
+    "control_writer": false
   },
   "10.0.0.50": {
     "name": "Engineering Workstation (EWS-01)",
     "zone": "Purdue Level 3 (Operations Zone)",
     "type": "Windows Workstation",
     "criticality": "Medium",
-    "owner": "Engineering Team"
+    "owner": "Engineering Team",
+    "control_writer": false
   }
 }
