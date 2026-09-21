@@ -68,6 +68,7 @@ committed captures in a container and records the result:
 | `baseline_modbus.pcap` | 610 reads, no writes | **0 alerts** — the benign case stays quiet |
 | `modbus_recon_fanout.pcap` | 3 reads across 3 control assets | **0 alerts** — a coverage gap, see below |
 | `setpoint_write.pcap` | 6 reads, 1 setpoint-class write | **SID 9000001** fired |
+| `setpoint_write_maintenance.pcap` | 6 reads, 1 setpoint-class write | **SID 9000001** fired |
 
 ```
 "signature": "OT Modbus Write Single Register From Unauthorized Control Writer"
@@ -82,6 +83,62 @@ false-positive measurement over committed traffic. **The zero on the enumeration
 capture is a gap, not a success:** the ruleset detects control writes and has no
 rule for read-only fan-out across control assets, which is the first rule worth
 adding.
+
+---
+
+## Detection quality and tuning
+
+A detection that nobody dispositions is a detection nobody has checked. This
+repository closes that loop: the audit log records **what fired** on each
+committed capture, `automation/dispositions.jsonl` records **what an analyst
+decided**, and `automation/detection_quality.py` joins them into the committed
+metric in `metrics/detection-quality.md`.
+
+```bash
+python3 automation/detection_quality.py --record \
+    --capture setpoint_write_maintenance.pcap \
+    --disposition expected_change \
+    --note "approved change CHG-1042; source still not an allowlisted writer"
+```
+
+Two rates are reported per detection, because they answer different questions.
+**Correctness** asks whether the detection fired on the behaviour it describes.
+**Actionability** asks whether it was worth an analyst's time. A rule can be
+perfectly correct and still be noise, and only the second rate shows it.
+
+<!-- The table below is generated: automation/tests/test_ingest.py fails if it
+     drifts from metrics/detection-quality.md. -->
+
+| Detection | Fired in | Reviewed | TP | Expected | Benign | FP | Dup | Unresolved | Correctness | Actionability |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `dpi:drift` | `baseline_modbus.pcap` | 1/1 | 0 | 0 | 1 | 0 | 0 | 0 | — | 0% |
+| `dpi:read_fanout` | `modbus_recon_fanout.pcap` | 1/1 | 1 | 0 | 0 | 0 | 0 | 0 | 100% | 100% |
+| `dpi:setpoint_write` | `setpoint_write.pcap`, `setpoint_write_maintenance.pcap` | 2/2 | 1 | 1 | 0 | 0 | 0 | 0 | 100% | 50% |
+| `sid:9000001` | `setpoint_write.pcap`, `setpoint_write_maintenance.pcap` | 2/2 | 1 | 1 | 0 | 0 | 0 | 0 | 100% | 50% |
+
+The metric drives the tuning work rather than a report: `dpi:drift` fires on
+normal polling, so the fix is to register the source or scope the finding;
+`sid:9000001` is correct but only half of its firings were actionable, so the
+tuning belongs in the context layer, not in the rule.
+
+### Severity from context, not just from the operation
+
+Severity combines what was done, how much the asset matters, and whether an
+approved change window covers the event. `automation/change_windows.json` is the
+change calendar, matched on asset, operation class and the **event time read from
+the capture** — not the time the pipeline happened to run.
+
+That is what separates the two write captures. They contain the same class of
+operation from the same non-allowlisted writer, and the same rule fires on both:
+
+| Capture | Change window | Severity | Why |
+| :--- | :--- | :--- | :--- |
+| `setpoint_write.pcap` | none covers 2026-05-01 10:32 | **CRITICAL** | setpoint-class write, no approved change |
+| `setpoint_write_maintenance.pcap` | `CHG-1042`, 2026-05-02 02:00–04:00 | **HIGH** | same operation, approved window |
+
+It stops at HIGH rather than dropping to informational because the change window
+explains the *timing*, not the *identity*: the source is still not an allowlisted
+control writer, and that is worth confirming.
 
 ---
 
@@ -125,27 +182,38 @@ pipeline:
   `automation/asset_inventory.json` for Purdue zone, asset type, criticality and
   owner, and the report states whether the source is an *authorized control
   writer*.
+- **Event-driven triage** — an alert from Suricata's `eve.json` (or the committed
+  evidence file) triggers the enrichment and the report, and the report names the
+  alert that caused it instead of the profiler noticing a write.
 - **Derived ATT&CK mapping** — techniques are asserted from the observed
   operations, so a capture with no control writes cannot produce a report
   claiming a write technique.
+- **Severity from context** — operation class, asset criticality and the approved
+  change calendar, matched on the event time taken from the capture.
 - **NIST-aligned reporting** — an incident report per event, generated from
   `incident-response/Incident_Report_Template.md`.
+- **Triage loop** — every detection is dispositioned and the audit log and
+  dispositions are joined into a committed quality metric.
 - **Privacy sanitization** — optional `tcprewrite` anonymisation, applied only to
   the copy that ships, never to the evidence that is analysed.
 
 ```bash
-# Profile a capture and generate a report when a control operation is present
-python3 automation/malcolm_ingest.py --file setpoint_write.pcap
+# Alert-triggered triage: the evidence file names the capture and the alert
+python3 automation/malcolm_ingest.py --alerts detection-engineering/evidence/setpoint_write.json
 
-# Anonymise the copy that ships to Malcolm
+# Or against a live Suricata eve.json
+python3 automation/malcolm_ingest.py --file setpoint_write.pcap --alerts /var/log/suricata/eve.json
+
+# Profile a capture without an alert, and anonymise the copy that ships
 python3 automation/malcolm_ingest.py --file setpoint_write.pcap --sanitize
 ```
 
 ### Pipeline execution (visual proof)
 
-The walkthrough below is a real run against the committed captures: the benign
-baseline, the setpoint write and its CRITICAL report, the custody record, and
-the rule firing on the same bytes.
+The walkthrough below is a real run: alert-triggered triage of the setpoint
+write, the same detection inside an approved change window, the custody record
+joining each ingest to its detections, and the quality metric computed from
+analyst dispositions.
 
 ![Pipeline Demo](assets/pipeline_demo.gif)
 
@@ -162,10 +230,14 @@ result from committed evidence; it does not run a live Malcolm instance.
 - **Detection Engineering:** consumes the validated ICS Suricata ruleset from
   [ot-detection-engineering](https://github.com/LiamCarPer/ot-detection-engineering)
   and proves SID 9000001 fires on committed evidence.
+- **Detection Quality:** per-detection correctness and actionability derived from
+  analyst dispositions, with tuning actions rather than a raw number.
 - **Passive Asset Discovery:** identification of PLCs and HMIs from traffic, with
   no active scanning.
 - **Asset-Context Enrichment:** Purdue zone, criticality, owner, and write
   authorisation resolved from the asset inventory.
+- **Noise Reduction:** severity modelled on asset criticality and the approved
+  change calendar, matched on event time.
 - **Incident Response:** forensic reporting aligned with NIST SP 800-61, mapped
   to MITRE ATT&CK for ICS.
 - **Forensic Verification:** SHA-256 chain-of-custody logging in an append-only
@@ -179,12 +251,16 @@ OT-NDR-Malcolm-Pipeline/
 ├── README.md                           # Master project summary
 ├── CONTRIBUTING.md                     # Contribution guidelines
 ├── assets/                             # Demo recording, renderer and its README
-├── automation/                         # SOAR orchestration layer
+├── automation/                         # SOAR orchestration and triage layer
 │   ├── malcolm_ingest.py               # Main orchestration engine
+│   ├── detection_quality.py            # Dispositions -> per-detection metrics
+│   ├── dispositions.jsonl              # Analyst triage decisions
+│   ├── change_windows.json             # Approved change calendar
 │   ├── requirements.txt                # Python dependencies
 │   ├── asset_inventory.json            # OT asset database, including write allowlist
 │   ├── ingest_audit.log                # Append-only forensic audit trail (JSONL)
 │   └── tests/                          # Unit tests and real-capture tests
+├── metrics/                            # Generated detection-quality metric
 ├── pcaps/                              # Committed captures, generator and manifest
 ├── detection-engineering/              # Ruleset source, runner and rule-firing evidence
 ├── dashboards-and-visibility/          # SIEM/NDR visualisation proof
@@ -198,17 +274,27 @@ Stated up front, because they are the interesting part:
 - **The captures are lab-generated and small.** `baseline_modbus.pcap` and
   `modbus_recon_fanout.pcap` carry Modbus payloads on bare SYN packets with no
   TCP handshake, so they exercise the DPI profiler and **cannot** exercise any
-  `flow:to_server,established` Suricata rule. `setpoint_write.pcap` was built
-  with a full handshake for that reason. See `pcaps/README.md`.
+  `flow:to_server,established` Suricata rule. Both write captures were built with
+  a full handshake for that reason. See `pcaps/README.md`.
 - **The write allowlist lives in the asset model.** Authorized control writers
   (`172.21.0.20`, `172.22.0.10`) come from the ruleset's allowlist; the pipeline's
   inventory mirrors it. In a real site both would be exported from one asset
   source of truth.
+- **The change calendar is a lab fixture.** `automation/change_windows.json`
+  holds two hand-written windows. In a real site it would come from the change
+  management system, and the tuning problem becomes keeping it current rather
+  than writing it.
+- **The quality metric is a demonstration of the loop, not statistics.** It
+  covers four captures, and the dispositions are the author's own triage of lab
+  evidence rather than independent ground truth. What it demonstrates is the join
+  between what fired and what was decided, and the tuning actions that fall out
+  of it.
 - **`172.21.0.1`, the baseline master, is not in the asset inventory.** It is
-  reported as an unknown asset, which is an honest gap rather than a bug.
-- **No live capture path is committed.** The pipeline starts from PCAPs;
-  wiring it to a SPAN port or a Malcolm live interface is a deployment step, not
-  something this repository demonstrates.
+  reported as an unknown asset, which is an honest gap rather than a bug — and it
+  is why `dpi:drift` scores zero on actionability.
+- **No live capture path is committed.** The pipeline starts from PCAPs or an
+  alert file; wiring it to a SPAN port or a Malcolm live interface is a
+  deployment step, not something this repository demonstrates.
 - **No stateful detection.** Every rule is single-event; read-only enumeration is
   visible in the DPI output but nothing alerts on it.
 - **The screenshots are not reproducible arithmetic.** They are genuine Malcolm
@@ -218,14 +304,23 @@ Stated up front, because they are the interesting part:
 - **The narrative incident report is a tabletop exercise.** The derived reports
   under `incident-response/Incident_Report_*_<capture>.md` are generated from
   data; `Incident_Report_Modbus_Write.md` is a written exercise and says so.
+- **The audit log was re-baselined when the triage loop was added**, so that
+  every line carries the `trigger` and `detections` fields the metric joins on.
+  The re-baseline is recorded in `pcaps/README.md`, not hidden.
 
 ---
 
 ## Incident Response and Threat Hunting
 `incident-response/` contains both kinds of artifact: reports generated by the
 pipeline from the committed captures, a tabletop exercise report, the report
-template, and a threat-hunting guide with OpenSearch queries mapped to MITRE
-ATT&CK for ICS.
+template, and a threat-hunting guide with tshark and Arkime queries mapped to
+MITRE ATT&CK for ICS v19.2.
+
+Each generated report names the detections that produced it, the severity basis,
+and the change-window status, and every ingest is joined in
+`automation/ingest_audit.log` to the dispositions in
+`automation/dispositions.jsonl` — which is what `metrics/detection-quality.md` is
+computed from.
 
 ## Tech Stack
 -   **NDR Framework:** CISA Malcolm

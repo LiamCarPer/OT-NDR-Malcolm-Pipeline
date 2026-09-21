@@ -44,10 +44,26 @@ Thank you for your interest in improving this project. To maintain high engineer
   readable — one JSON object per line, never free text. Human-readable progress
   goes to stdout only.
 - **Captures**: `pcaps/` is evidence. If you add or change a capture, update
-  `pcaps/README.md`, re-run the pipeline so the audit log matches, and re-run
-  `detection-engineering/suricata_check.py` so the alert evidence is not stale.
-  `automation/tests/test_ingest.py` fails if the evidence and the capture hashes
-  disagree.
+  `pcaps/README.md`, re-run the pipeline so the audit log matches, re-run
+  `detection-engineering/suricata_check.py` so the alert evidence is not stale,
+  and re-run `automation/detection_quality.py`. `automation/tests/test_ingest.py`
+  fails if the evidence and the capture hashes disagree, or if the quality table
+  in `README.md` drifts from the generated metric.
+- **Change windows**: `automation/change_windows.json` is the approved change
+  calendar. Severity is a function of the operation, the asset criticality and
+  whether a window covers the event time read from the capture. A window explains
+  the timing of an operation, not the identity of the host performing it.
+- **Triage**: after triaging a report, record the outcome. The metric is only
+  worth having if the decisions behind it are recorded:
+  ```bash
+  python3 automation/detection_quality.py --record \
+      --capture setpoint_write.pcap --disposition true_positive \
+      --note "confirmed unauthorised write; change window did not cover it"
+  ```
+  Valid dispositions: `true_positive`, `expected_change`, `benign`,
+  `false_positive`, `duplicate`, `inconclusive`. The unit of triage is the
+  capture, so every detection that fired on it inherits the outcome; re-triaging
+  appends a newer record and the latest wins.
 - **Detection content** does not live here. Rules belong in
   [ot-detection-engineering](https://github.com/LiamCarPer/ot-detection-engineering).
 
