@@ -1,5 +1,5 @@
 # Incident Report: Unauthorized Modbus Setpoint Write
-**Report ID:** IR-20260921-175510-MODBUS  
+**Report ID:** IR-20260921-175827-MODBUS  
 **Classification:** Internal / OT-Confidential  
 **Status:** Open / Investigating  
 **Incident Lead:** Liam Carvajal (Automated)
@@ -12,9 +12,9 @@ On September 21, 2026, the OT monitoring system flagged a CRITICAL severity aler
 ## 2. Incident Timeline (UTC)
 | Timestamp | Event | Action Taken |
 | :--- | :--- | :--- |
-| 17:55:10 | Alert Triggered: Unauthorized Modbus Setpoint Write | Automatic PCAP Ingestion & DPI Analysis. |
-| 17:55:10 | Forensic Hash Generated: b96455802c695f0f3d0c7adf2cdfed7ba2238ff778957537f0d3b6266ad85bff | Integrity verified. |
-| 17:55:10 | Asset Context Enriched: Intake PLC (PLC-01) identified. | Context added to report. |
+| 17:58:27 | Alert Triggered: Unauthorized Modbus Setpoint Write | Automatic PCAP Ingestion & DPI Analysis. |
+| 17:58:27 | Forensic Hash Generated: b96455802c695f0f3d0c7adf2cdfed7ba2238ff778957537f0d3b6266ad85bff | Integrity verified. |
+| 17:58:27 | Asset Context Enriched: Intake PLC (PLC-01) identified. | Context added to report. |
 
 ## 3. Analysis and Forensic Evidence
 ### Network Forensics (DPI Analysis)
@@ -45,4 +45,4 @@ The rows below are derived from the operations actually observed. A capture with
 - [ ] Confirm whether 172.24.0.10 is expected to issue control writes in this window.
 - [ ] Inspect Malcolm dashboard for associated traffic flows.
 - [ ] Confirm physical state of Intake PLC (PLC-01).
-- [ ] Rotate credentials if lateral movement is confirmed.
+- [ ] Triage 172.24.0.10 for compromise before restoring normal trust.

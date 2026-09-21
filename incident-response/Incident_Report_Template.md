@@ -44,4 +44,4 @@ The rows below are derived from the operations actually observed. A capture with
 - [ ] Confirm whether {{ SOURCE_IP }} is expected to issue control writes in this window.
 - [ ] Inspect Malcolm dashboard for associated traffic flows.
 - [ ] Confirm physical state of {{ TARGET_ASSET }}.
-- [ ] Rotate credentials if lateral movement is confirmed.
+- [ ] Triage {{ SOURCE_IP }} for compromise before restoring normal trust.
