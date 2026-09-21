@@ -1,0 +1,25 @@
+{
+  "_comment": "Approved change windows. The pipeline matches these on the asset, the operation class and the event time taken from the capture, and uses the result to adjust report severity. A window explains the timing of an operation; it does not authorise the source, so a write inside a window from a host that is not an allowlisted control writer is still reported.",
+  "windows": [
+    {
+      "id": "CHG-1042",
+      "assets": ["172.21.0.10"],
+      "operations": ["setpoint_write", "write"],
+      "start": "2026-05-02T02:00:00Z",
+      "end": "2026-05-02T04:00:00Z",
+      "owner": "OT Operations Team",
+      "ticket": "CHG-1042",
+      "reason": "Intake PLC pressure setpoint recalibration"
+    },
+    {
+      "id": "CHG-1051",
+      "assets": ["172.21.0.12"],
+      "operations": ["any"],
+      "start": "2026-05-05T09:00:00Z",
+      "end": "2026-05-05T17:00:00Z",
+      "owner": "Instrumentation Team",
+      "ticket": "CHG-1051",
+      "reason": "Flow meter firmware update window"
+    }
+  ]
+}

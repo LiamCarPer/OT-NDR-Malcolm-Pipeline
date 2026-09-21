@@ -28,6 +28,7 @@ PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
 PCAP_SOURCE = os.path.join(PROJECT_DIR, "pcaps")
 AUDIT_LOG = os.path.join(SCRIPT_DIR, "ingest_audit.log")
 ASSET_INVENTORY = os.path.join(SCRIPT_DIR, "asset_inventory.json")
+CHANGE_WINDOWS = os.path.join(SCRIPT_DIR, "change_windows.json")
 REPORT_TEMPLATE = os.path.join(PROJECT_DIR, "incident-response", "Incident_Report_Template.md")
 REPORT_OUTPUT_DIR = os.path.join(PROJECT_DIR, "incident-response")
 SANITIZE_DIR = os.path.join(tempfile.gettempdir(), "ot-ndr-sanitized")
@@ -38,6 +39,40 @@ SANITIZE_DIR = os.path.join(tempfile.gettempdir(), "ot-ndr-sanitized")
 READ_FUNCTIONS = {"1", "2", "3", "4"}
 WRITE_FUNCTIONS = {"5", "6", "15", "16"}
 SETPOINT_REGISTER_FLOOR = 1000
+
+# --- Severity model ---
+# Severity is derived from three inputs, not from the operation alone: what was
+# done, how much the asset matters, and whether an approved change window covers
+# the event. The adjustment is applied to the operation's base severity and
+# clamped, so the model stays explainable in the report.
+SEVERITY_STEPS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+OPERATION_SEVERITY = {
+    "setpoint_write": "CRITICAL",
+    "write": "HIGH",
+    "read_fanout": "MEDIUM",
+    "drift": "MEDIUM",
+}
+# A write inside an approved change window is not unauthorised by timing, so it
+# is named for what it is; the source is still checked separately.
+OPERATION_LABELS = {
+    "setpoint_write": ("Unauthorized Modbus Setpoint Write", "Unauthorized Setpoint Manipulation"),
+    "write": ("Unauthorized Modbus Write", "Unauthorized Command Execution"),
+    "read_fanout": ("Modbus Read Enumeration", "Reconnaissance"),
+    "drift": ("Modbus Baseline Drift", "Baseline Drift"),
+}
+WINDOW_LABELS = {
+    "setpoint_write": (
+        "Modbus Setpoint Write During Approved Change Window",
+        "Setpoint Manipulation During Approved Change Window",
+    ),
+    "write": (
+        "Modbus Write During Approved Change Window",
+        "Control Write During Approved Change Window",
+    ),
+}
+CRITICALITY_ADJUSTMENT = {"critical": 0, "high": 0, "medium": -1, "low": -2}
+# An asset with no recorded criticality is not downgraded: unknown is not low.
+CRITICALITY_DEFAULT = 0
 
 # ATT&CK for ICS techniques this DPI heuristic can assert, and the evidence
 # required for each one. Techniques are never hardcoded into a report: they are
@@ -77,6 +112,84 @@ def load_inventory():
         except json.JSONDecodeError:
             logger.error("Failed to decode asset inventory JSON.")
     return {}
+
+
+def load_change_windows():
+    """Load approved change windows, if the file exists."""
+    if not os.path.exists(CHANGE_WINDOWS):
+        return []
+    try:
+        with open(CHANGE_WINDOWS) as f:
+            return json.load(f).get("windows", [])
+    except json.JSONDecodeError:
+        logger.error("Failed to decode change window JSON.")
+        return []
+
+
+def parse_utc(value):
+    """Parse an ISO-8601 timestamp, treating a trailing Z as UTC."""
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def find_change_window(asset, operation, when):
+    """
+    Return the approved change window covering this event, or None.
+
+    The window is matched on the asset, the operation class and the event time
+    taken from the capture - not the time the pipeline happens to run, which
+    would let a later ingest silently mismatch an earlier event.
+    """
+    if when is None:
+        return None
+    for window in load_change_windows():
+        assets = window.get("assets", [])
+        if asset not in assets and "*" not in assets:
+            continue
+        operations = window.get("operations", [])
+        if operation not in operations and "any" not in operations:
+            continue
+        if parse_utc(window["start"]) <= when <= parse_utc(window["end"]):
+            return window
+    return None
+
+
+def operation_class(stats):
+    """Classify what the capture actually contains, most severe first."""
+    if stats.get("critical_writes"):
+        return "setpoint_write"
+    if stats.get("writes"):
+        return "write"
+    if stats.get("reads") and len(stats.get("dst_ips", [])) > 1:
+        return "read_fanout"
+    return "drift"
+
+
+def severity_for(operation, criticality, within_window):
+    """Derive severity from the operation, the asset criticality and the window."""
+    index = SEVERITY_STEPS.index(OPERATION_SEVERITY[operation])
+    index += CRITICALITY_ADJUSTMENT.get(str(criticality).lower(), CRITICALITY_DEFAULT)
+    if within_window:
+        index -= 1
+    return SEVERITY_STEPS[max(0, min(len(SEVERITY_STEPS) - 1, index))]
+
+
+def severity_basis(operation, criticality, window):
+    """Explain the severity in one sentence an analyst can check."""
+    described = {
+        "setpoint_write": "Setpoint-class write",
+        "write": "Control write",
+        "read_fanout": "Read-only fan-out across control assets",
+        "drift": "Read-only traffic with no control operation",
+    }[operation]
+    level = str(criticality or "unknown").lower()
+    if window:
+        timing = (
+            f"the event falls inside approved change window {window['id']} "
+            f"({window.get('reason', 'no reason recorded')})"
+        )
+    else:
+        timing = "no approved change window covers the event"
+    return f"{described} against a {level}-criticality asset, and {timing}."
 
 
 def calculate_sha256(file_path):
@@ -146,7 +259,9 @@ def analyze_pcap_dpi(file_path):
     Profile Modbus/TCP traffic and derive ATT&CK for ICS techniques.
 
     The whole capture is read, so the counts are exact and never silently
-    truncated. Returns None if the analysis could not run, so the caller fails
+    truncated. Event times come from the capture itself, not from the clock, so
+    a report describes when the traffic happened rather than when it was
+    processed. Returns None if the analysis could not run, so the caller fails
     loudly instead of reporting a partial profile as a result.
     """
     logger.info(f"Starting deep packet inspection (DPI) for {os.path.basename(file_path)}")
@@ -162,6 +277,9 @@ def analyze_pcap_dpi(file_path):
         "writes": 0,
         "critical_writes": 0,
         "mitre_tags": [],
+        "first_event": None,
+        "last_event": None,
+        "first_write_event": None,
     }
 
     try:
@@ -177,6 +295,7 @@ def analyze_pcap_dpi(file_path):
             "-e", "ip.dst",
             "-e", "modbus.func_code",
             "-e", "modbus.reference_num",
+            "-e", "frame.time_epoch",
             "-Y", "mbtcp && tcp.dstport == 502",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -189,7 +308,7 @@ def analyze_pcap_dpi(file_path):
         logger.warning("No Modbus TCP traffic identified in capture.")
         return stats
 
-    src_ips, dst_ips, func_codes, references = [], [], [], []
+    src_ips, dst_ips, func_codes, references, times = [], [], [], [], []
     for line in lines:
         parts = line.split("\t")
         if len(parts) < 3 or not parts[2]:
@@ -198,6 +317,7 @@ def analyze_pcap_dpi(file_path):
         dst_ips.append(parts[1])
         func_codes.append(parts[2].split(",")[0])
         references.append(parts[3] if len(parts) > 3 else "")
+        times.append(parts[4] if len(parts) > 4 else "")
 
     stats["src_ips"] = sorted(set(src_ips))
     stats["dst_ips"] = sorted(set(dst_ips))
@@ -226,6 +346,18 @@ def analyze_pcap_dpi(file_path):
         and int(reference) >= SETPOINT_REGISTER_FLOOR
     )
 
+    epoch_times = [float(value) for value in times if value]
+    if epoch_times:
+        stats["first_event"] = datetime.fromtimestamp(min(epoch_times), timezone.utc)
+        stats["last_event"] = datetime.fromtimestamp(max(epoch_times), timezone.utc)
+    write_times = [
+        float(value)
+        for value, code in zip(times, func_codes)
+        if value and code in WRITE_FUNCTIONS
+    ]
+    if write_times:
+        stats["first_write_event"] = datetime.fromtimestamp(min(write_times), timezone.utc)
+
     tags = []
     if stats["writes"]:
         tags.append("T0836")
@@ -246,27 +378,122 @@ def analyze_pcap_dpi(file_path):
     return stats
 
 
-def render_mitre_rows(stats):
-    """Render the ATT&CK for ICS table rows from the techniques actually asserted."""
-    tags = stats.get("mitre_tags", [])
-    if not tags:
-        return "| — | — | No ATT&CK for ICS technique is asserted for this traffic. |"
-    return "\n".join(
-        f"| {tag} | {MITRE_TECHNIQUES[tag][0]} | {MITRE_TECHNIQUES[tag][1]} |"
-        for tag in tags
+def load_alerts(path):
+    """
+    Read the alerts that triggered this report.
+
+    Two shapes are accepted: a Suricata eve.json (JSONL, or a JSON array), and
+    the alert-evidence file `detection-engineering/suricata_check.py` writes,
+    which also carries the capture name so `--file` can be omitted.
+    """
+    with open(path) as f:
+        text = f.read().strip()
+
+    capture = None
+    try:
+        payload = json.loads(text) if text else []
+    except json.JSONDecodeError:
+        payload = [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    alerts = []
+    if isinstance(payload, dict):
+        capture = payload.get("capture")
+        payload = payload.get("alerts", [])
+
+    for record in payload:
+        if not isinstance(record, dict):
+            continue
+        inner = record.get("alert") if isinstance(record.get("alert"), dict) else None
+        if inner is None and record.get("event_type") not in (None, "alert"):
+            continue
+        source = inner or record
+        alerts.append(
+            {
+                "sid": source.get("signature_id", source.get("sid")),
+                "signature": source.get("signature"),
+                "timestamp": record.get("timestamp"),
+            }
+        )
+    return alerts, capture
+
+
+def derive_detections(stats, alerts):
+    """
+    Name what triggered this report, in keys the triage loop can join on.
+
+    IDS alerts are keyed by SID; the DPI finding is keyed by the operation class.
+    The same keys appear in the report, in the audit log and in dispositions, so
+    "what fired" and "what an analyst decided" can be joined without guessing.
+    """
+    detections = []
+    for alert in alerts:
+        key = f"sid:{alert['sid']}"
+        if key not in detections:
+            detections.append(key)
+    detections.append(f"dpi:{operation_class(stats)}")
+    return detections
+
+
+def normalise_timestamp(value):
+    """Render a Suricata timestamp as a second-resolution UTC string."""
+    if not value:
+        return "unknown"
+    try:
+        return parse_utc(value).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return str(value)
+
+
+def render_trigger_section(context, file_name):
+    """Render the section that says what caused this report to exist."""
+    alerts = context["alerts"]
+    if alerts:
+        rows = "\n".join(
+            f"| {alert['sid']} | {alert['signature']} | "
+            f"{normalise_timestamp(alert['timestamp'])} |"
+            for alert in alerts
+        )
+        evidence = context.get("evidence") or "not recorded"
+        plural = "alert" if len(alerts) == 1 else "alerts"
+        return (
+            f"This report was triggered by {len(alerts)} IDS {plural}. Evidence: "
+            f"`{evidence}`.\n\n"
+            "| SID | Signature | Event time |\n"
+            "| :--- | :--- | :--- |\n"
+            f"{rows}"
+        )
+    if context["trigger"] == "forced":
+        return (
+            "No IDS alert triggered this report. It was forced with "
+            "`--trigger-alert`, so it reflects the DPI profile below rather than "
+            "a detection."
+        )
+    return (
+        "No IDS alert triggered this report. It was generated from the DPI "
+        f"profile because the capture contains a `{context['operation']}` "
+        "finding, and nothing in this repository alerts on it."
     )
 
 
-def generate_incident_report(stats, file_name, sha256):
-    """Generate a NIST-aligned incident report enriched with asset context."""
+def render_change_window(context):
+    """Render the change-window status for the report."""
+    window = context.get("window")
+    if not window:
+        return (
+            "No approved change window covers the event "
+            "(`automation/change_windows.json`)."
+        )
+    return (
+        f"Covered by `{window['id']}` — {window.get('reason', 'no reason recorded')} "
+        f"({window.get('owner', 'unowned')}, {window['start']} to {window['end']}). "
+        f"Ticket: {window.get('ticket', 'none')}."
+    )
+
+
+def build_report_context(stats, file_name, alerts=None, evidence=None, forced=False):
+    """Resolve everything a report needs: assets, severity, window, detections."""
     inventory = load_inventory()
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    # The capture name is part of the report name: two captures ingested in the
-    # same second would otherwise collide and overwrite each other, and the name
-    # should say which evidence produced the report.
-    stem = os.path.splitext(file_name)[0]
-    report_name = f"Incident_Report_{timestamp}_{stem}.md"
-    report_path = os.path.join(REPORT_OUTPUT_DIR, report_name)
+    alerts = alerts or []
 
     target_ip = stats.get("primary_target") or "Unknown"
     # Prefer the source of the control operations: that is the asset an analyst
@@ -295,35 +522,111 @@ def generate_incident_report(stats, file_name, sha256):
     else:
         authorized = "No (asset is not an allowlisted control writer)"
 
-    if stats["critical_writes"]:
-        alert_message = "Unauthorized Modbus Setpoint Write"
-        attack_type = "Unauthorized Setpoint Manipulation"
-        severity = "CRITICAL"
-    elif stats["writes"]:
-        alert_message = "Unauthorized Modbus Write"
-        attack_type = "Unauthorized Command Execution"
-        severity = "HIGH"
+    operation = operation_class(stats)
+    # The window is matched on the asset the operation was aimed at and on the
+    # time the operation happened, read from the capture.
+    window = find_change_window(
+        target_ip,
+        operation,
+        stats.get("first_write_event") or stats.get("first_event"),
+    )
+    criticality = target_ctx["criticality"]
+    severity = severity_for(operation, criticality, window)
+
+    alert_message, attack_type = OPERATION_LABELS[operation]
+    if window and operation in WINDOW_LABELS:
+        alert_message, attack_type = WINDOW_LABELS[operation]
+
+    if alerts:
+        trigger = "alert"
+    elif forced:
+        trigger = "forced"
     else:
-        alert_message = "Modbus Baseline Drift"
-        attack_type = "Reconnaissance / Baseline Drift"
-        severity = "MEDIUM"
+        trigger = "profiler"
+
+    return {
+        "file_name": file_name,
+        "alerts": alerts,
+        "evidence": evidence,
+        "trigger": trigger,
+        "operation": operation,
+        "window": window,
+        "severity": severity,
+        "severity_basis": severity_basis(operation, criticality, window),
+        "detections": derive_detections(stats, alerts),
+        "alert_message": alert_message,
+        "attack_type": attack_type,
+        "source_ip": source_ip,
+        "source_ctx": source_ctx,
+        "target_ip": target_ip,
+        "target_ctx": target_ctx,
+        "authorized": authorized,
+    }
+
+
+def render_mitre_rows(stats):
+    """Render the ATT&CK for ICS table rows from the techniques actually asserted."""
+    tags = stats.get("mitre_tags", [])
+    if not tags:
+        return "| — | — | No ATT&CK for ICS technique is asserted for this traffic. |"
+    return "\n".join(
+        f"| {tag} | {MITRE_TECHNIQUES[tag][0]} | {MITRE_TECHNIQUES[tag][1]} |"
+        for tag in tags
+    )
+
+
+def generate_incident_report(stats, file_name, sha256, context=None):
+    """Generate a NIST-aligned incident report enriched with asset context."""
+    if context is None:
+        context = build_report_context(stats, file_name)
 
     now = datetime.now(timezone.utc)
+    timestamp = now.strftime("%Y%m%d-%H%M%S")
+    # The capture name is part of the report name: two captures ingested in the
+    # same second would otherwise collide and overwrite each other, and the name
+    # should say which evidence produced the report.
+    stem = os.path.splitext(file_name)[0]
+    report_path = os.path.join(REPORT_OUTPUT_DIR, f"Incident_Report_{timestamp}_{stem}.md")
+
+    first_event = stats.get("first_event")
+    last_event = stats.get("last_event")
+    if first_event and last_event:
+        event_date = first_event.strftime("%B %d, %Y")
+        event_window = (
+            f"{first_event.strftime('%Y-%m-%d %H:%M:%S')} – "
+            f"{last_event.strftime('%H:%M:%S')}"
+        )
+    else:
+        event_date = "an undetermined date"
+        event_window = "not derived (no Modbus traffic in the capture)"
+
+    target_ctx = context["target_ctx"]
+    source_ctx = context["source_ctx"]
+    detections = ", ".join(f"`{key}`" for key in context["detections"])
+
     replacements = {
-        "{{ ALERT_MESSAGE }}": alert_message,
+        "{{ ALERT_MESSAGE }}": context["alert_message"],
         "{{ TIMESTAMP_ID }}": timestamp,
         "{{ INCIDENT_LEAD }}": "Liam Carvajal (Automated)",
-        "{{ DATE }}": now.strftime("%B %d, %Y"),
-        "{{ EVENT_TIME }}": now.strftime("%H:%M:%S"),
-        "{{ SEVERITY }}": severity,
-        "{{ ATTACK_TYPE }}": attack_type,
+        "{{ REPORT_DATE }}": now.strftime("%B %d, %Y"),
+        "{{ REPORT_TIME }}": now.strftime("%H:%M:%S"),
+        "{{ REPORT_TIMESTAMP }}": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "{{ EVENT_DATE }}": event_date,
+        "{{ EVENT_WINDOW }}": event_window,
+        "{{ SEVERITY }}": context["severity"],
+        "{{ SEVERITY_BASIS }}": context["severity_basis"],
+        "{{ ATTACK_TYPE }}": context["attack_type"],
+        "{{ CHANGE_WINDOW }}": render_change_window(context),
+        "{{ TRIGGER_SECTION }}": render_trigger_section(context, file_name),
+        "{{ DETECTIONS }}": detections,
+        "{{ CAPTURE_NAME }}": file_name,
         "{{ TARGET_ASSET }}": target_ctx["name"],
-        "{{ TARGET_IP }}": target_ip,
+        "{{ TARGET_IP }}": context["target_ip"],
         "{{ TARGET_ZONE }}": target_ctx["zone"],
-        "{{ SOURCE_IP }}": source_ip,
+        "{{ SOURCE_IP }}": context["source_ip"],
         "{{ SOURCE_ASSET }}": source_ctx["name"],
         "{{ SOURCE_ZONE }}": source_ctx["zone"],
-        "{{ SOURCE_AUTHORIZED }}": authorized,
+        "{{ SOURCE_AUTHORIZED }}": context["authorized"],
         "{{ SHA256 }}": sha256,
         "{{ FUNC_CODES }}": ", ".join(stats["func_codes"]),
         "{{ REQUEST_COUNT }}": str(stats["modbus_requests"]),
@@ -354,17 +657,39 @@ def generate_incident_report(stats, file_name, sha256):
         return None
 
 
-def ingest_pcap(file_name, trigger_report=False, sanitize=False):
+def ingest_pcap(file_name, trigger_report=False, sanitize=False, alerts_path=None):
     """
     Run the ingestion pipeline: hash -> DPI -> report -> [sanitize] -> ingest.
 
     DPI and context enrichment always run against the original evidence;
-    sanitization only ever affects the copy that is shipped to Malcolm.
+    sanitization only ever affects the copy that is shipped to Malcolm. An
+    alert file turns the run into an alert-triggered triage: the report names the
+    alert that caused it instead of the profiler noticing a write.
     """
     src = os.path.join(PCAP_SOURCE, file_name)
     if not os.path.exists(src):
         logger.error(f"Source file not found: {src}")
         return False
+
+    alerts, evidence_capture = [], None
+    evidence_name = None
+    if alerts_path:
+        try:
+            alerts, evidence_capture = load_alerts(alerts_path)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.error(f"Could not read alerts from {alerts_path}: {e}")
+            return False
+        if not alerts:
+            logger.warning(f"No alert records in {alerts_path}.")
+        # An evidence file names the capture it was produced from. If that does
+        # not match, the wiring is wrong and the report would describe the wrong
+        # evidence, so stop rather than guess.
+        if evidence_capture and evidence_capture != file_name:
+            logger.error(
+                f"Alert evidence is for {evidence_capture}, but {file_name} was given."
+            )
+            return False
+        evidence_name = os.path.relpath(alerts_path, PROJECT_DIR)
 
     file_size = os.path.getsize(src)
     sha256 = calculate_sha256(src)
@@ -377,8 +702,14 @@ def ingest_pcap(file_name, trigger_report=False, sanitize=False):
         update_audit_log(file_name, sha256, "FAILED (DPI error)", file_size)
         return False
 
-    if trigger_report or stats.get("writes", 0) > 0:
-        generate_incident_report(stats, file_name, sha256)
+    context = build_report_context(
+        stats, file_name, alerts=alerts, evidence=evidence_name, forced=trigger_report
+    )
+    logger.info(f"Trigger: {context['trigger']} | detections: {', '.join(context['detections'])}")
+    logger.info(f"Severity {context['severity']} — {context['severity_basis']}")
+
+    if alerts or trigger_report or stats.get("writes", 0) > 0:
+        generate_incident_report(stats, file_name, sha256, context)
 
     work_file = src
     sanitized_sha256 = None
@@ -398,7 +729,14 @@ def ingest_pcap(file_name, trigger_report=False, sanitize=False):
                 f"({MALCOLM_PCAP_DIR} not present)."
             )
 
-        audit_fields = {"sanitized_sha256": sanitized_sha256} if sanitized_sha256 else {}
+        audit_fields = {
+            "trigger": context["trigger"],
+            "detections": context["detections"],
+        }
+        if alerts:
+            audit_fields["alert_sids"] = [alert["sid"] for alert in alerts]
+        if sanitized_sha256:
+            audit_fields["sanitized_sha256"] = sanitized_sha256
         update_audit_log(file_name, sha256, "SUCCESS", file_size, **audit_fields)
         return True
     except OSError as e:
@@ -415,10 +753,33 @@ def main():
     parser.add_argument("--trigger-alert", action="store_true", help="Force report generation")
     parser.add_argument("--sanitize", action="store_true",
                         help="Anonymize evidence before ingestion")
+    parser.add_argument(
+        "--alerts",
+        help="Alert file that triggered this triage: a Suricata eve.json, or the "
+             "evidence file written by detection-engineering/suricata_check.py",
+    )
 
     args = parser.parse_args()
 
-    if args.all:
+    if args.alerts and args.all:
+        parser.error("--alerts triggers one triage; it cannot be combined with --all")
+        return
+
+    if args.alerts:
+        # The evidence file names the capture, so --file is optional with it.
+        if not args.file:
+            _, capture = load_alerts(args.alerts)
+            if not capture:
+                parser.error("--alerts without --file needs an evidence file naming the capture")
+                return
+            args.file = capture
+        ingest_pcap(
+            args.file,
+            trigger_report=args.trigger_alert,
+            sanitize=args.sanitize,
+            alerts_path=args.alerts,
+        )
+    elif args.all:
         files = [f for f in sorted(os.listdir(PCAP_SOURCE)) if f.endswith((".pcap", ".pcapng"))]
         for f in files:
             ingest_pcap(f, trigger_report=args.trigger_alert, sanitize=args.sanitize)

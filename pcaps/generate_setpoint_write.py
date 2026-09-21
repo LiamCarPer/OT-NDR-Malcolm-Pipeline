@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """
-Generate the Modbus setpoint-write capture used by the NDR pipeline.
+Generate the Modbus setpoint-write captures used by the NDR pipeline.
 
 The committed captures are small and synthetic by design: the proof this
-repository needs must be reproducible without a live plant. This script builds
-``pcaps/setpoint_write.pcap``, a supervisory session in which the Engineering
-HMI polls the Intake PLC and then writes a setpoint-class holding register
-(1050) - the operation the pipeline classifies as a critical control write.
+repository needs must be reproducible without a live plant. This script writes
+two captures that contain the same *kind* of operation in two different
+contexts, which is what the severity model is built to tell apart:
+
+- ``setpoint_write.pcap`` - 2026-05-01 10:31:00 UTC, outside any approved change
+  window, so it is reported CRITICAL.
+- ``setpoint_write_maintenance.pcap`` - 2026-05-02 02:15:00 UTC, inside the
+  approved window CHG-1042 in ``automation/change_windows.json``, so the same
+  classification is reported one step lower.
+
+The output is deterministic: the same commit always produces the same bytes.
 
 Sessions include a full TCP handshake so Suricata treats them as established
 flows, which the ``flow:to_server,established`` rules in ot-detection-engineering
@@ -31,11 +38,19 @@ PLC = "172.21.0.10"   # Intake PLC (Purdue L1)
 PLC_PORT = 502
 
 SETPOINT_REGISTER = 1050
-SETPOINT_VALUE = 4200
 
-# 2026-05-01 10:31:00 UTC, four minutes after the reconnaissance fan-out capture
-# (modbus_recon_fanout.pcap runs 10:27:07 - 10:27:21 UTC).
-BASE_TIME = datetime(2026, 5, 1, 10, 31, 0, tzinfo=timezone.utc).timestamp()
+CAPTURES = [
+    {
+        "name": "setpoint_write.pcap",
+        "base_time": datetime(2026, 5, 1, 10, 31, 0, tzinfo=timezone.utc).timestamp(),
+        "value": 4200,
+    },
+    {
+        "name": "setpoint_write_maintenance.pcap",
+        "base_time": datetime(2026, 5, 2, 2, 15, 0, tzinfo=timezone.utc).timestamp(),
+        "value": 4150,
+    },
+]
 
 
 def modbus(transaction: int, unit: int, function: int, data: bytes) -> bytes:
@@ -104,37 +119,39 @@ def session(client_port: int, start: float, requests: list[bytes], responses: li
     return packets
 
 
-def build() -> list:
-    """Build the capture: routine polling, then a poll, a setpoint write and a read-back."""
+def build(base_time: float, value: int) -> list:
+    """Build one capture: routine polling, then a poll, a setpoint write and a read-back."""
     packets = session(
         41000,
-        BASE_TIME,
+        base_time,
         [read_holding_registers(t, 0, 10) for t in range(1, 5)],
         [read_holding_registers_response(t, bytes(20)) for t in range(1, 5)],
     )
     packets += session(
         41001,
-        BASE_TIME + 60,
+        base_time + 60,
         [
             read_holding_registers(5, 0, 10),
-            write_single_register(6, SETPOINT_REGISTER, SETPOINT_VALUE),
+            write_single_register(6, SETPOINT_REGISTER, value),
             read_holding_registers(7, SETPOINT_REGISTER, 2),
         ],
         [
             read_holding_registers_response(5, bytes(20)),
-            write_single_register(6, SETPOINT_REGISTER, SETPOINT_VALUE),
-            read_holding_registers_response(7, SETPOINT_VALUE.to_bytes(2, "big") + b"\x00\x00"),
+            write_single_register(6, SETPOINT_REGISTER, value),
+            read_holding_registers_response(7, value.to_bytes(2, "big") + b"\x00\x00"),
         ],
     )
     return packets
 
 
 def main() -> None:
-    """Write the capture next to this script."""
-    out = Path(__file__).resolve().parent / "setpoint_write.pcap"
-    packets = build()
-    wrpcap(str(out), packets)
-    print(f"Wrote {len(packets)} packets to {out}")
+    """Write every capture next to this script."""
+    here = Path(__file__).resolve().parent
+    for spec in CAPTURES:
+        packets = build(spec["base_time"], spec["value"])
+        out = here / spec["name"]
+        wrpcap(str(out), packets)
+        print(f"Wrote {len(packets)} packets to {out}")
 
 
 if __name__ == "__main__":

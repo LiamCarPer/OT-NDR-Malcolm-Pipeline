@@ -26,6 +26,7 @@ EVIDENCE_DIR = os.path.join(PROJECT_DIR, "detection-engineering", "evidence")
 ATTACK_ICS_CATALOG = os.path.join(
     os.path.dirname(PROJECT_DIR), "ot-detection-engineering", "metadata", "attack_ics_catalog.json"
 )
+CHANGE_WINDOWS = os.path.join(PROJECT_DIR, "automation", "change_windows.json")
 
 requires_tshark = pytest.mark.skipif(
     shutil.which("tshark") is None, reason="tshark is not installed"
@@ -46,6 +47,9 @@ def make_stats(**overrides):
         "critical_writes": 1,
         "write_sources": ["172.24.0.10"],
         "mitre_tags": ["T0836", "T1692.001"],
+        "first_event": None,
+        "last_event": None,
+        "first_write_event": None,
     }
     stats.update(overrides)
     return stats
@@ -393,3 +397,248 @@ def test_mitre_techniques_match_pinned_catalog():
         assert catalog[technique] == name, (
             f"{technique} is '{catalog[technique]}' in the catalog, not '{name}'"
         )
+
+
+# --- Severity model -------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "operation,criticality,within_window,expected",
+    [
+        ("setpoint_write", "High", False, "CRITICAL"),
+        ("setpoint_write", "High", True, "HIGH"),
+        ("setpoint_write", "Medium", False, "HIGH"),
+        ("setpoint_write", "Medium", True, "MEDIUM"),
+        ("setpoint_write", "Low", True, "LOW"),
+        ("write", "High", False, "HIGH"),
+        ("write", "High", True, "MEDIUM"),
+        ("write", "Medium", False, "MEDIUM"),
+        ("write", "Medium", True, "LOW"),
+        ("read_fanout", "High", False, "MEDIUM"),
+        ("drift", "High", False, "MEDIUM"),
+    ],
+)
+def test_severity_matrix(operation, criticality, within_window, expected):
+    """Severity is a function of the operation, the asset and the change calendar."""
+    assert malcolm_ingest.severity_for(operation, criticality, within_window) == expected
+
+
+def test_unknown_criticality_is_not_downgraded():
+    """An asset nobody has classified is not treated as unimportant."""
+    assert malcolm_ingest.severity_for("setpoint_write", "Unknown", False) == "CRITICAL"
+
+
+def test_severity_basis_names_the_inputs():
+    """The report has to justify its severity, not just assert it."""
+    basis = malcolm_ingest.severity_basis(
+        "setpoint_write", "High", {"id": "CHG-1", "reason": "setpoint recalibration"}
+    )
+    assert "setpoint-class write" in basis.lower()
+    assert "high-criticality" in basis
+    assert "CHG-1" in basis
+
+    without = malcolm_ingest.severity_basis("drift", "High", None)
+    assert "no approved change window" in without
+
+
+def test_change_window_matches_asset_operation_and_event_time(tmp_path):
+    """A window only covers the asset, operation and period it was written for."""
+    windows = tmp_path / "change_windows.json"
+    windows.write_text(json.dumps({"windows": [{
+        "id": "CHG-1",
+        "assets": ["10.0.0.1"],
+        "operations": ["setpoint_write"],
+        "start": "2026-05-02T02:00:00Z",
+        "end": "2026-05-02T04:00:00Z",
+    }]}))
+
+    inside = malcolm_ingest.parse_utc("2026-05-02T02:16:00Z")
+    outside = malcolm_ingest.parse_utc("2026-05-01T10:31:00Z")
+
+    with patch("malcolm_ingest.CHANGE_WINDOWS", str(windows)):
+        assert malcolm_ingest.find_change_window(
+            "10.0.0.1", "setpoint_write", inside)["id"] == "CHG-1"
+        assert malcolm_ingest.find_change_window("10.0.0.1", "setpoint_write", outside) is None
+        assert malcolm_ingest.find_change_window("10.0.0.9", "setpoint_write", inside) is None
+        assert malcolm_ingest.find_change_window("10.0.0.1", "drift", inside) is None
+        assert malcolm_ingest.find_change_window("10.0.0.1", "setpoint_write", None) is None
+
+
+def test_missing_change_window_file_is_not_an_error(tmp_path):
+    """A deployment with no change calendar still works; nothing is covered."""
+    with patch("malcolm_ingest.CHANGE_WINDOWS", str(tmp_path / "absent.json")):
+        assert malcolm_ingest.load_change_windows() == []
+        assert malcolm_ingest.find_change_window(
+            "10.0.0.1", "setpoint_write", malcolm_ingest.parse_utc("2026-05-02T02:16:00Z")
+        ) is None
+
+
+# --- Alert triggering -----------------------------------------------------
+
+def test_load_alerts_from_evidence_file():
+    """The evidence file names the capture, so --file can be omitted."""
+    alerts, capture = malcolm_ingest.load_alerts(
+        os.path.join(EVIDENCE_DIR, "setpoint_write.json")
+    )
+
+    assert capture == "setpoint_write.pcap"
+    assert [alert["sid"] for alert in alerts] == [9000001]
+    assert "Write Single Register" in alerts[0]["signature"]
+
+
+def test_load_alerts_from_eve_jsonl(tmp_path):
+    """A raw Suricata eve.json is JSONL and carries alert plus non-alert records."""
+    eve = tmp_path / "eve.json"
+    eve.write_text(
+        '{"timestamp":"2026-05-01T10:32:00.020001+0000","event_type":"alert",'
+        '"alert":{"signature_id":9000001,"signature":"OT Modbus Write"}}\n'
+        '{"timestamp":"2026-05-01T10:32:01.000000+0000","event_type":"flow"}\n'
+    )
+
+    alerts, capture = malcolm_ingest.load_alerts(str(eve))
+
+    assert capture is None
+    assert len(alerts) == 1
+    assert alerts[0]["sid"] == 9000001
+    assert alerts[0]["signature"] == "OT Modbus Write"
+
+
+def test_derive_detections_lists_alerts_before_the_profiler():
+    """Detection keys are the join between what fired and what an analyst decided."""
+    detections = malcolm_ingest.derive_detections(make_stats(), [{"sid": 9000001}])
+
+    assert detections == ["sid:9000001", "dpi:setpoint_write"]
+
+
+def test_ingest_refuses_evidence_for_a_different_capture(tmp_path):
+    """Wiring the wrong evidence to a capture would describe the wrong bytes."""
+    source_dir = tmp_path / "pcaps"
+    source_dir.mkdir()
+    (source_dir / "a.pcap").write_bytes(b"a")
+    (source_dir / "b.pcap").write_bytes(b"b")
+    evidence = tmp_path / "b.json"
+    evidence.write_text(json.dumps({
+        "capture": "b.pcap",
+        "alerts": [{"sid": 9000001, "signature": "x", "timestamp": "y"}],
+    }))
+    audit_log = tmp_path / "audit.log"
+
+    with patch("malcolm_ingest.PCAP_SOURCE", str(source_dir)), \
+            patch("malcolm_ingest.AUDIT_LOG", str(audit_log)):
+        assert malcolm_ingest.ingest_pcap("a.pcap", alerts_path=str(evidence)) is False
+
+    assert not audit_log.exists()
+
+
+def test_ingest_records_trigger_and_detections(tmp_path):
+    """The audit record is the join table the quality metric is built on."""
+    source_dir = tmp_path / "pcaps"
+    source_dir.mkdir()
+    (source_dir / "sample.pcap").write_bytes(b"evidence")
+    audit_log = tmp_path / "audit.log"
+
+    with patch("malcolm_ingest.PCAP_SOURCE", str(source_dir)), \
+            patch("malcolm_ingest.AUDIT_LOG", str(audit_log)), \
+            patch("malcolm_ingest.MALCOLM_PCAP_DIR", str(tmp_path / "none")), \
+            patch("malcolm_ingest.REPORT_OUTPUT_DIR", str(tmp_path)), \
+            patch("malcolm_ingest.analyze_pcap_dpi", return_value=make_stats()):
+        assert malcolm_ingest.ingest_pcap("sample.pcap") is True
+
+    entry = json.loads(audit_log.read_text().strip())
+    assert entry["trigger"] == "profiler"
+    assert entry["detections"] == ["dpi:setpoint_write"]
+
+
+# --- Event time and the change calendar, against the committed captures ----
+
+@requires_tshark
+def test_event_times_come_from_the_capture_not_the_clock():
+    """Reports describe when the traffic happened, not when the pipeline ran."""
+    stats = malcolm_ingest.analyze_pcap_dpi(os.path.join(PCAPS_DIR, "setpoint_write.pcap"))
+
+    assert stats["first_event"].strftime("%Y-%m-%d %H:%M") == "2026-05-01 10:31"
+    assert stats["last_event"].strftime("%Y-%m-%d %H:%M") == "2026-05-01 10:32"
+    assert stats["first_write_event"].strftime("%Y-%m-%d %H:%M") == "2026-05-01 10:32"
+
+
+@requires_tshark
+def test_maintenance_capture_profile():
+    """The maintenance capture carries the same classification as the attack one."""
+    stats = malcolm_ingest.analyze_pcap_dpi(
+        os.path.join(PCAPS_DIR, "setpoint_write_maintenance.pcap")
+    )
+
+    assert stats["writes"] == 1
+    assert stats["critical_writes"] == 1
+    assert stats["mitre_tags"] == ["T0836", "T1692.001"]
+
+
+@requires_tshark
+def test_same_detection_different_context_is_reported_differently():
+    """
+    The headline of the tuning model: identical detection, different severity.
+
+    Both captures are the same class of operation from a non-allowlisted writer.
+    One falls inside an approved change window and one does not, and that alone
+    moves the report from CRITICAL to HIGH.
+    """
+    plain = malcolm_ingest.build_report_context(
+        malcolm_ingest.analyze_pcap_dpi(os.path.join(PCAPS_DIR, "setpoint_write.pcap")),
+        "setpoint_write.pcap",
+    )
+    in_window = malcolm_ingest.build_report_context(
+        malcolm_ingest.analyze_pcap_dpi(
+            os.path.join(PCAPS_DIR, "setpoint_write_maintenance.pcap")
+        ),
+        "setpoint_write_maintenance.pcap",
+    )
+
+    assert plain["window"] is None
+    assert plain["severity"] == "CRITICAL"
+    assert plain["detections"] == ["dpi:setpoint_write"]
+
+    assert in_window["window"]["id"] == "CHG-1042"
+    assert in_window["severity"] == "HIGH"
+    # The source is still not an allowlisted writer in either case.
+    assert in_window["authorized"].startswith("No")
+
+
+@requires_tshark
+def test_committed_change_window_file_is_valid():
+    """The committed calendar parses and covers the capture it is meant to."""
+    windows = malcolm_ingest.load_change_windows()
+
+    assert windows, f"{CHANGE_WINDOWS} should declare at least one window"
+    for window in windows:
+        assert malcolm_ingest.parse_utc(window["start"]) < malcolm_ingest.parse_utc(window["end"])
+        assert window["id"] and window["owner"] and window["reason"]
+
+    maintenance = malcolm_ingest.find_change_window(
+        "172.21.0.10", "setpoint_write", malcolm_ingest.parse_utc("2026-05-02T02:16:00Z")
+    )
+    assert maintenance is not None
+    assert malcolm_ingest.find_change_window(
+        "172.21.0.10", "setpoint_write", malcolm_ingest.parse_utc("2026-05-01T10:32:00Z")
+    ) is None
+
+
+def test_readme_quality_table_matches_the_generated_metric():
+    """
+    The README quotes derived numbers, so a stale headline has to fail.
+
+    This is the same discipline the sibling repository applies to its coverage
+    table: if a number is worth publishing, something should break when it stops
+    being true.
+    """
+    with open(os.path.join(PROJECT_DIR, "metrics", "detection-quality.md")) as f:
+        metrics = f.read()
+    with open(os.path.join(PROJECT_DIR, "README.md")) as f:
+        readme = f.read()
+
+    rows = [
+        line for line in metrics.splitlines()
+        if line.startswith("| `") and ".pcap" in line
+    ]
+    assert rows, "the per-detection metric rows are missing"
+
+    for row in rows:
+        assert row in readme, f"README is stale for: {row[:70]}"

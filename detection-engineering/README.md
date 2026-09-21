@@ -23,6 +23,7 @@ captures in a container and records the result per capture under `evidence/`.
 | `baseline_modbus.pcap` | 0 |
 | `modbus_recon_fanout.pcap` | 0 |
 | `setpoint_write.pcap` | 1 — SID 9000001, "OT Modbus Write Single Register From Unauthorized Control Writer" |
+| `setpoint_write_maintenance.pcap` | 1 — the same rule, on the same class of operation inside an approved change window |
 
 Each evidence file records the SHA-256 of the capture and of the ruleset that
 produced the alert, so the claim is tied to exact bytes on both sides.
