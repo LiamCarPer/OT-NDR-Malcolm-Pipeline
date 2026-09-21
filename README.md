@@ -4,18 +4,25 @@
 [![Framework: CISA Malcolm](https://img.shields.io/badge/Framework-CISA%20Malcolm-blue)](https://malcolm.fyi/)
 
 ## Objective
-To emulate the Continuous Threat Detection (CTD) and passive asset visibility of commercial platforms like Nozomi Networks and Claroty using open-source tools. This project demonstrates a production-grade pipeline for industrial network security, specifically focused on Deep Packet Inspection (DPI) of the Modbus TCP protocol within a Purdue-model environment.
+To build the open-source equivalent of the passive visibility and protocol-aware
+triage that commercial OT monitoring platforms provide: ingest industrial
+traffic, profile it at the protocol layer, enrich what it finds with asset
+context, and produce a defensible incident record. The focus is Modbus TCP in a
+Purdue-model lab environment, built on **CISA Malcolm**.
+
+This is a lab pipeline. The [scope and limits](#scope-and-limits) section states
+exactly what the committed evidence does and does not prove.
 
 ## Visual Architecture
 ```mermaid
 graph LR
-    subgraph Lab [OT-Security-Lab]
+    subgraph Lab [OT lab environment]
         direction TB
         PLC[PLC - Siemens/Schneider]
         HMI[Industrial HMI]
     end
 
-    Traffic(PCAP / Port Mirroring)
+    Traffic(PCAP capture)
 
     subgraph Malcolm [CISA Malcolm Engine]
         direction TB
@@ -37,90 +44,193 @@ graph LR
 ```
 
 ## Architecture Overview
-The pipeline ingests raw network traffic (PCAPs) from a simulated Industrial Control System (ICS) environment, processing it through a multi-stage analysis stack:
+The pipeline ingests network traffic (PCAPs) from a simulated Industrial Control
+System (ICS) environment and processes it through a multi-stage analysis stack:
 
-1.  **Traffic Capture:** Real-time capture of Modbus TCP traffic between HMIs and PLCs.
-2.  **Ingestion:** Automatic processing via **CISA Malcolm**.
-3.  **Analysis:** Protocol decoding and SPI (Stateful Packet Inspection) via **Arkime**.
-4.  **Detection:** Alert generation via **Suricata** IDS with custom industrial rules.
-5.  **Visibility:** Asset discovery and threat hunting via **OpenSearch** dashboards.
+1.  **Traffic capture:** Modbus TCP between supervisory hosts and PLCs, committed under `pcaps/`.
+2.  **Ingestion:** automatic processing via **CISA Malcolm**.
+3.  **Analysis:** protocol decoding and session reconstruction via **Zeek** and **Arkime**.
+4.  **Detection:** alert generation via **Suricata**, using the ruleset from [ot-detection-engineering](https://github.com/LiamCarPer/ot-detection-engineering).
+5.  **Triage:** deep packet inspection, asset-context enrichment and NIST-aligned reporting via `automation/malcolm_ingest.py`.
+6.  **Visibility:** asset discovery and threat hunting in **OpenSearch**.
 
 ---
 
-## Visual Proof of Pipeline Performance
+## Detection proof
 
-### Passive Asset Discovery (OpenSearch)
-Malcolm automatically identifies assets by analyzing traffic patterns. The dashboard below demonstrates the automated discovery and fingerprinting of PLC and HMI nodes within the OT environment.
+The ruleset is validated in `ot-detection-engineering`. What this repository adds
+is proof that it fires on *this* pipeline's evidence.
+`detection-engineering/suricata_check.py` runs the generated ruleset over the
+committed captures in a container and records the result:
+
+| Capture | Modbus operations | Suricata result |
+| :--- | :--- | :--- |
+| `baseline_modbus.pcap` | 610 reads, no writes | **0 alerts** — the benign case stays quiet |
+| `modbus_recon_fanout.pcap` | 3 reads across 3 control assets | **0 alerts** — a coverage gap, see below |
+| `setpoint_write.pcap` | 6 reads, 1 setpoint-class write | **SID 9000001** fired |
+
+```
+"signature": "OT Modbus Write Single Register From Unauthorized Control Writer"
+```
+
+Each evidence file records the SHA-256 of both the capture and the ruleset that
+produced the alert, so the claim is tied to exact bytes on both sides. See
+`detection-engineering/evidence/`.
+
+**The zero on the benign capture is the useful number** — a real
+false-positive measurement over committed traffic. **The zero on the enumeration
+capture is a gap, not a success:** the ruleset detects control writes and has no
+rule for read-only fan-out across control assets, which is the first rule worth
+adding.
+
+---
+
+## Visual proof
+
+### Passive asset discovery (OpenSearch)
+Malcolm identifies OT assets by analysing traffic patterns rather than scanning.
+The dashboard below is the vendor-asset inventory over the committed captures:
+five Modbus devices, with the baseline master (`172.21.0.1`) accounting for the
+large majority of bytes and the supervisory host a small minority.
 ![Passive Asset Discovery](dashboards-and-visibility/passive_asset_discovery.png)
 
-### Lateral Movement Analysis (Arkime)
-Using Arkime SPI Graphs, network connections are visualized to identify anomalous traffic flows across Purdue levels. This visualization captures a lateral movement attack attempting to pivot from the operations network into the control zone.
-![Arkime Lateral Movement](dashboards-and-visibility/arkime_lateral_movement.png)
+**What it proves and what it does not:** the devices are discovered passively and
+the relative volumes match the captures. The Vendor column is empty, so this is
+discovery, not fingerprinting — no vendor or model was identified.
+
+### Flow analysis (Arkime)
+Arkime's SPI Graph shows the same traffic as connections between hosts. The
+graph below is the read-only fan-out from `172.24.0.10` to three control assets
+in fourteen seconds.
+![Arkime SPI Graph](dashboards-and-visibility/arkime_lateral_movement.png)
+
+**What it proves and what it does not:** it is a session visualisation of the
+committed capture. It is not stateful packet inspection, and the earlier
+"lateral movement" description was wrong — the bytes show enumeration, so the
+capture and the caption now say so.
 
 ---
 
 ## Security Orchestration (SOAR)
-To streamline forensic workflows, this project includes a **Python-based Security Orchestration (SOAR) layer**. This layer transforms raw ingestion into an automated incident response pipeline by enriching network alerts with asset context and generating forensic reports.
 
-**Key Orchestration Features:**
-- **Automated Ingestion**: Programmatic movement of PCAPs from the lab to the analysis stack.
-- **Privacy Sanitization**: Automated IP anonymization using `tcprewrite` to preserve data privacy during evidence movement.
-- **Asset Context Enrichment**: Automatically cross-references detected IPs against a JSON-based **Asset Inventory** to identify Purdue Level, asset type, and criticality.
-- **Advanced DPI Profiling**: Pre-ingestion analysis using `tshark` to extract Modbus function codes and identify unauthorized register manipulation.
-- **Automated Incident Reporting**: Dynamically generates NIST-aligned incident reports mapped to the **MITRE ATT&CK for ICS** matrix.
-- **Forensic Chain of Custody**: Automated SHA-256 hashing and persistent audit logging.
+`automation/malcolm_ingest.py` turns raw ingestion into an automated triage
+pipeline:
+
+- **Forensic integrity** — SHA-256 of every artifact, recorded in an append-only
+  JSONL audit log (`automation/ingest_audit.log`), one object per ingestion.
+- **Protocol-aware DPI** — `tshark` extracts Modbus function codes and reference
+  numbers, classifies reads against writes, and flags writes to setpoint-class
+  registers (`>= 1000`).
+- **Asset-context enrichment** — detected IPs are resolved against
+  `automation/asset_inventory.json` for Purdue zone, asset type, criticality and
+  owner, and the report states whether the source is an *authorized control
+  writer*.
+- **Derived ATT&CK mapping** — techniques are asserted from the observed
+  operations, so a capture with no control writes cannot produce a report
+  claiming a write technique.
+- **NIST-aligned reporting** — an incident report per event, generated from
+  `incident-response/Incident_Report_Template.md`.
+- **Privacy sanitization** — optional `tcprewrite` anonymisation, applied only to
+  the copy that ships, never to the evidence that is analysed.
 
 ```bash
-# Example: Automated ingestion with privacy sanitization
-python3 automation/malcolm_ingest.py --file modbus_attack.pcap --sanitize --trigger-alert
+# Profile a capture and generate a report when a control operation is present
+python3 automation/malcolm_ingest.py --file setpoint_write.pcap
+
+# Anonymise the copy that ships to Malcolm
+python3 automation/malcolm_ingest.py --file setpoint_write.pcap --sanitize
 ```
 
-### Pipeline Execution (Visual Proof)
-The terminal demo below showcases the automated ingestion process, including forensic hashing, DPI profiling, and real-time detection of unauthorized Modbus control commands.
+### Pipeline execution (visual proof)
+
+The walkthrough below is a real run against the committed captures: the benign
+baseline, the setpoint write and its CRITICAL report, the custody record, and
+the rule firing on the same bytes.
 
 ![Pipeline Demo](assets/pipeline_demo.gif)
 
-**Note:** Use the `--trigger-alert` flag to simulate a Suricata rule firing and force the generation of a forensic incident report enriched with asset context.
+The raw recording is committed as `assets/pipeline_demo.cast`, and
+`assets/render_cast.py` re-renders it. Note that the demo reads the rule-firing
+result from committed evidence; it does not run a live Malcolm instance.
 
 ---
 
 ## Key Capabilities Demonstrated
-- **Deep Packet Inspection (DPI)**: Analysis of Modbus TCP function codes and register values to detect logic manipulation.
-- **Passive Asset Discovery**: Automated identification of PLCs, HMIs, and workstations without active scanning.
-- **Detection Engineering**: Consumes the validated ICS Suricata ruleset from [ot-detection-engineering](https://github.com/LiamCarPer/ot-detection-engineering).
-- **Incident Response**: Forensic investigations aligned with NIST SP 800-61.
-- **Forensic Verification**: Implementation of SHA-256 chain-of-custody logging.
+
+- **Deep Packet Inspection (DPI):** Modbus TCP function-code analysis, read/write
+  classification, and setpoint-register detection.
+- **Detection Engineering:** consumes the validated ICS Suricata ruleset from
+  [ot-detection-engineering](https://github.com/LiamCarPer/ot-detection-engineering)
+  and proves SID 9000001 fires on committed evidence.
+- **Passive Asset Discovery:** identification of PLCs and HMIs from traffic, with
+  no active scanning.
+- **Asset-Context Enrichment:** Purdue zone, criticality, owner, and write
+  authorisation resolved from the asset inventory.
+- **Incident Response:** forensic reporting aligned with NIST SP 800-61, mapped
+  to MITRE ATT&CK for ICS.
+- **Forensic Verification:** SHA-256 chain-of-custody logging in an append-only
+  audit log.
 
 ## Repository Structure
 ```bash
 OT-NDR-Malcolm-Pipeline/
-├── .github/workflows/                  # CI/CD Pipeline (GitHub Actions)
+├── .github/workflows/main.yml          # CI: tests + lint
+├── .flake8                             # Lint configuration
 ├── README.md                           # Master project summary
-├── CONTRIBUTING.md                     # Engineering contribution guidelines
-├── automation/                         # SOAR Orchestration layer
+├── CONTRIBUTING.md                     # Contribution guidelines
+├── assets/                             # Demo recording, renderer and its README
+├── automation/                         # SOAR orchestration layer
 │   ├── malcolm_ingest.py               # Main orchestration engine
-│   ├── Dockerfile                      # Containerized deployment
 │   ├── requirements.txt                # Python dependencies
-│   ├── asset_inventory.json            # OT Asset Database
-│   ├── ingest_audit.log                # Forensic audit trail
-│   └── tests/                          # Unit testing suite
-├── pcaps/                              # Raw network traffic data
-├── detection-engineering/              # Suricata ruleset source and install notes
-├── dashboards-and-visibility/          # SIEM/NDR visualization proof
+│   ├── asset_inventory.json            # OT asset database, including write allowlist
+│   ├── ingest_audit.log                # Append-only forensic audit trail (JSONL)
+│   └── tests/                          # Unit tests and real-capture tests
+├── pcaps/                              # Committed captures, generator and manifest
+├── detection-engineering/              # Ruleset source, runner and rule-firing evidence
+├── dashboards-and-visibility/          # SIEM/NDR visualisation proof
 └── incident-response/                  # NIST-aligned forensic reporting
 ```
+
+## Scope and limits
+
+Stated up front, because they are the interesting part:
+
+- **The captures are lab-generated and small.** `baseline_modbus.pcap` and
+  `modbus_recon_fanout.pcap` carry Modbus payloads on bare SYN packets with no
+  TCP handshake, so they exercise the DPI profiler and **cannot** exercise any
+  `flow:to_server,established` Suricata rule. `setpoint_write.pcap` was built
+  with a full handshake for that reason. See `pcaps/README.md`.
+- **The write allowlist lives in the asset model.** Authorized control writers
+  (`172.21.0.20`, `172.22.0.10`) come from the ruleset's allowlist; the pipeline's
+  inventory mirrors it. In a real site both would be exported from one asset
+  source of truth.
+- **`172.21.0.1`, the baseline master, is not in the asset inventory.** It is
+  reported as an unknown asset, which is an honest gap rather than a bug.
+- **No live capture path is committed.** The pipeline starts from PCAPs;
+  wiring it to a SPAN port or a Malcolm live interface is a deployment step, not
+  something this repository demonstrates.
+- **No stateful detection.** Every rule is single-event; read-only enumeration is
+  visible in the DPI output but nothing alerts on it.
+- **The screenshots are not reproducible arithmetic.** They are genuine Malcolm
+  and Arkime captures, but their byte totals come from Zeek's connection
+  accounting across the ingests recorded in the audit log, so treat them as
+  evidence of the device set and its shape, not as a calculation you can redo.
+- **The narrative incident report is a tabletop exercise.** The derived reports
+  under `incident-response/Incident_Report_*_<capture>.md` are generated from
+  data; `Incident_Report_Modbus_Write.md` is a written exercise and says so.
 
 ---
 
 ## Incident Response and Threat Hunting
-The project includes a comprehensive Incident Report documenting a simulated setpoint manipulation attack. Findings are mapped to the MITRE ATT&CK ICS Matrix to provide a standardized view of the threat actor's tactics.
-
----
+`incident-response/` contains both kinds of artifact: reports generated by the
+pipeline from the committed captures, a tabletop exercise report, the report
+template, and a threat-hunting guide with OpenSearch queries mapped to MITRE
+ATT&CK for ICS.
 
 ## Tech Stack
 -   **NDR Framework:** CISA Malcolm
 -   **SIEM/Visualization:** OpenSearch / Dashboards
--   **Forensics:** Arkime (Flow Visualization)
--   **IDS:** Suricata (Custom OT Rulesets)
--   **Automation:** Python 3.x
+-   **Flow Analysis:** Arkime
+-   **IDS:** Suricata (ICS ruleset from ot-detection-engineering)
+-   **Automation:** Python 3.12
 -   **Protocols:** Modbus TCP (ICS/SCADA)
