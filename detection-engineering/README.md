@@ -32,9 +32,13 @@ Two things worth saying plainly:
 
 - **The zero on the benign capture is the useful number.** It is a real
   false-positive measurement over committed traffic, not an authored baseline.
-- **The zero on the enumeration capture is a coverage gap, not a success.** The
-  ruleset detects control writes; it has no rule for read-only fan-out across
-  control assets. The DPI profiler asserts T0888 on it, but nothing alerts.
+- **The zero on the enumeration capture is not a gap any more — but it is not
+  this ruleset that closed it.** These are Suricata rules, and they cover control
+  writes. Read-only fan-out is a correlation problem: no per-event signature can
+  separate an enumerating host from a polling one, because polling produces more
+  matches. `Modbus Control Asset Enumeration` in ot-detection-engineering counts
+  distinct destinations per source in a five-minute window instead, and converts
+  to Loki, Splunk and OpenSearch.
 
 ```bash
 python3 detection-engineering/suricata_check.py            # sibling checkout

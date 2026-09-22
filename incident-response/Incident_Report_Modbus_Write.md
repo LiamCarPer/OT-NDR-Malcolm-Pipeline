@@ -85,9 +85,12 @@ it has no need to write.
 
 **What actually went wrong in the tooling, and was fixed:**
 
-1. **The enumeration was invisible.** No rule covers read-only fan-out. The DPI
-   profiler asserts T0888 but nothing alerts on it. This is the first rule worth
-   adding: N distinct control assets read by one source inside a short window.
+1. **The enumeration was invisible.** No rule covered read-only fan-out; the DPI
+   profiler asserted T0888 but nothing alerted. It is now covered by the `Modbus
+   Control Asset Enumeration` correlation rule in `ot-detection-engineering`:
+   N distinct control assets read by one source inside a five-minute window. Note
+   what fixed it: not a better signature, but a distinct-value count over time,
+   because a per-event rule cannot tell an enumerator from a poller.
 2. **The write allowlist lived in the rule, not the asset model.** The ruleset's
    authorized writers (`172.21.0.20`, `172.22.0.10`) and this pipeline's asset
    inventory did not agree. The inventory now carries a `control_writer` flag,
@@ -104,5 +107,5 @@ it has no need to write.
 1. An alert that has never been shown to fire is a hypothesis, not a detection.
 2. Identity decisions belong in the asset model, where a new HMI is visible,
    rather than in a rule, where it is invisible.
-3. Read-only reconnaissance is where the coverage gap is, and it is cheap to
-   close.
+3. Read-only reconnaissance was the coverage gap, and closing it needed state
+   rather than a cleverer signature.

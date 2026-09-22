@@ -47,10 +47,14 @@ tags == "modbus" && ip == 172.24.0.10
 2. Check each destination against the asset inventory for zone and criticality.
 3. Ask whether the source has any operational reason to read those assets.
 
-**Detection status:** *no rule covers this.* The DPI profiler in this repository
-asserts T0888 on the committed fan-out capture, but the Suricata ruleset has no
-read-enumeration rule, so nothing alerts. This is the first rule worth adding,
-and it needs a window, which means stateful detection.
+**Detection status:** covered by a correlation rule, not by a Suricata rule.
+`Modbus Control Asset Enumeration` in
+[ot-detection-engineering](https://github.com/LiamCarPer/ot-detection-engineering)
+counts distinct destinations per source inside a five-minute window, because no
+per-event signature can separate an enumerating host from a polling one: normal
+polling produces more matches than enumeration does. The DPI profiler here
+asserts T0888 on the committed fan-out capture and fired the triage; the
+correlation rule is what alerts on it.
 
 ---
 

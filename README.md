@@ -66,7 +66,7 @@ committed captures in a container and records the result:
 | Capture | Modbus operations | Suricata result |
 | :--- | :--- | :--- |
 | `baseline_modbus.pcap` | 610 reads, no writes | **0 alerts** — the benign case stays quiet |
-| `modbus_recon_fanout.pcap` | 3 reads across 3 control assets | **0 alerts** — a coverage gap, see below |
+| `modbus_recon_fanout.pcap` | 3 reads across 3 control assets | **0 alerts** — covered by a correlation rule, not a Suricata rule, see below |
 | `setpoint_write.pcap` | 6 reads, 1 setpoint-class write | **SID 9000001** fired |
 | `setpoint_write_maintenance.pcap` | 6 reads, 1 setpoint-class write | **SID 9000001** fired |
 
@@ -80,9 +80,15 @@ produced the alert, so the claim is tied to exact bytes on both sides. See
 
 **The zero on the benign capture is the useful number** — a real
 false-positive measurement over committed traffic. **The zero on the enumeration
-capture is a gap, not a success:** the ruleset detects control writes and has no
-rule for read-only fan-out across control assets, which is the first rule worth
-adding.
+capture is not a detection failure, but it is not a Suricata success either:**
+the ruleset detects control writes, and read-only fan-out is covered one layer up
+by a correlation rule. `Modbus Control Asset Enumeration` in
+[ot-detection-engineering](https://github.com/LiamCarPer/ot-detection-engineering)
+counts distinct destinations per source inside a five-minute window, which is
+what separates an enumerating host from a polling one — a per-event signature
+cannot, because normal polling produces *more* matches than enumeration does. It
+converts to Loki, Splunk and OpenSearch queries; it is not a Suricata rule, which
+is why this table stays at zero alerts.
 
 ---
 
@@ -295,8 +301,12 @@ Stated up front, because they are the interesting part:
 - **No live capture path is committed.** The pipeline starts from PCAPs or an
   alert file; wiring it to a SPAN port or a Malcolm live interface is a
   deployment step, not something this repository demonstrates.
-- **No stateful detection.** Every rule is single-event; read-only enumeration is
-  visible in the DPI output but nothing alerts on it.
+- **Stateful detection is one rule deep.** Read-only enumeration is now covered
+  by a correlation rule in `ot-detection-engineering` (distinct destinations per
+  source over five minutes), but it is the only stateful detection in either
+  repository. It is also not a Suricata rule, so it does not appear in this
+  repository's alert-evidence table, and it has not been exercised in a live
+  stack — it is proven offline against event sequences.
 - **The screenshots are not reproducible arithmetic.** They are genuine Malcolm
   and Arkime captures, but their byte totals come from Zeek's connection
   accounting across the ingests recorded in the audit log, so treat them as

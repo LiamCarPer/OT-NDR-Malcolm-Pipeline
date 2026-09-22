@@ -49,7 +49,7 @@ the outcome; re-triaging a capture appends a record and the latest wins.
 
 - The corpus is 4 committed captures in a lab. The rates are a
   demonstration of the loop, not statistics.
-- The dispositions are the author's own triage of lab evidence (2026-09-21 to 2026-09-21), not independent
+- The dispositions are the author's own triage of lab evidence (2026-09-21 to 2026-09-22), not independent
   ground truth. A real programme needs analysts who are not the detection author.
 - A detection with no dispositions is not evidence of quality. It is an unread queue,
   which is why the unreviewed count appears in the tuning actions rather than hidden.
