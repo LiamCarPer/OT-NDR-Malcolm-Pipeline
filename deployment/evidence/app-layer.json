@@ -1,0 +1,26 @@
+{
+  "capture": "setpoint_write.pcap",
+  "capture_sha256": "b96455802c695f0f3d0c7adf2cdfed7ba2238ff778957537f0d3b6266ad85bff",
+  "rules": "ot-detection.rules",
+  "rules_sha256": "717e3dcb5d9aaa82576df7f79a973958b45af05174bd3b1e5b46efd464d9e924",
+  "image": "jasonish/suricata:latest",
+  "claim": "the Modbus application-layer parser is required for the OT rules to fire",
+  "parser_disabled": {
+    "modbus_parser_enabled": false,
+    "alert_count": 0,
+    "alerts": []
+  },
+  "parser_enabled": {
+    "modbus_parser_enabled": true,
+    "alert_count": 1,
+    "alerts": [
+      {
+        "sid": 9000001,
+        "has_app_layer_detail": true
+      }
+    ]
+  },
+  "sids_with_parser_enabled": [
+    9000001
+  ]
+}

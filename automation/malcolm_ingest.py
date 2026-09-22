@@ -657,7 +657,84 @@ def generate_incident_report(stats, file_name, sha256, context=None):
         return None
 
 
-def ingest_pcap(file_name, trigger_report=False, sanitize=False, alerts_path=None):
+def ingested_hashes():
+    """SHA-256 of every capture the audit log records as successfully ingested.
+
+    The audit log is already the record of what was ingested, so the watcher's
+    deduplication reads it rather than keeping a second store that could drift
+    from it.
+    """
+    seen = set()
+    if not os.path.exists(AUDIT_LOG):
+        return seen
+    with open(AUDIT_LOG) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(entry.get("status", "")).startswith("SUCCESS") and entry.get("sha256"):
+                seen.add(entry["sha256"])
+    return seen
+
+
+def watch_pass(directory, known, sizes, sanitize=False):
+    """
+    One pass over a watched directory. Returns the updated known hashes.
+
+    Split out from the loop so the behaviour can be tested: a capture is
+    ingested the first time its size is stable and its hash is not already in the
+    audit log, and every later pass skips it.
+    """
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith((".pcap", ".pcapng")):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if sizes.get(name) != size:
+            # First sight, or the writer has not finished: look again next pass.
+            sizes[name] = size
+            continue
+        digest = calculate_sha256(path)
+        if digest is None:
+            continue
+        if digest in known:
+            logger.info(f"Already ingested, skipping: {name}")
+            continue
+        logger.info(f"New capture: {name}")
+        ingest_pcap(name, sanitize=sanitize, source_dir=directory)
+        known = ingested_hashes()
+    return known
+
+
+def watch_capture_dir(directory, interval=5.0, sanitize=False):
+    """
+    Ingest captures as they appear in a directory, each one exactly once.
+
+    This is the deployed shape: Malcolm rotates live captures into a directory
+    and this watches it. A capture whose SHA-256 is already in the audit log is
+    skipped, so restarting the service does not re-ingest the estate.
+    """
+    logger.info(f"Watching {directory} for captures every {interval:g}s.")
+    known = ingested_hashes()
+    sizes = {}
+    try:
+        while True:
+            known = watch_pass(directory, known, sizes, sanitize=sanitize)
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        logger.info("Watch stopped.")
+        return 0
+
+
+def ingest_pcap(file_name, trigger_report=False, sanitize=False, alerts_path=None,
+                source_dir=None):
     """
     Run the ingestion pipeline: hash -> DPI -> report -> [sanitize] -> ingest.
 
@@ -665,8 +742,11 @@ def ingest_pcap(file_name, trigger_report=False, sanitize=False, alerts_path=Non
     sanitization only ever affects the copy that is shipped to Malcolm. An
     alert file turns the run into an alert-triggered triage: the report names the
     alert that caused it instead of the profiler noticing a write.
+
+    ``source_dir`` defaults to the repository's ``pcaps/`` and is overridden by
+    watch mode, where the capture arrives in the directory being watched.
     """
-    src = os.path.join(PCAP_SOURCE, file_name)
+    src = os.path.join(source_dir or PCAP_SOURCE, file_name)
     if not os.path.exists(src):
         logger.error(f"Source file not found: {src}")
         return False
@@ -720,9 +800,15 @@ def ingest_pcap(file_name, trigger_report=False, sanitize=False, alerts_path=Non
             sanitized_sha256 = calculate_sha256(sanitized_path)
 
     try:
+        destination = os.path.join(MALCOLM_PCAP_DIR, file_name)
         if os.path.exists(MALCOLM_PCAP_DIR):
-            shutil.copy2(work_file, os.path.join(MALCOLM_PCAP_DIR, file_name))
-            logger.info(f"Pipeline success: {file_name} ingested to Malcolm.")
+            if os.path.abspath(work_file) == os.path.abspath(destination):
+                # Watch mode: the capture is already in the directory Malcolm
+                # monitors, so there is nothing to ship.
+                logger.info(f"Already in the Malcolm directory: {file_name}")
+            else:
+                shutil.copy2(work_file, destination)
+                logger.info(f"Pipeline success: {file_name} ingested to Malcolm.")
         else:
             logger.info(
                 f"Simulation mode: {file_name} processed successfully "
@@ -758,8 +844,30 @@ def main():
         help="Alert file that triggered this triage: a Suricata eve.json, or the "
              "evidence file written by detection-engineering/suricata_check.py",
     )
+    parser.add_argument(
+        "--watch",
+        metavar="DIR",
+        help="Run as a service: ingest captures that appear in DIR, once each. "
+             "This is the deployed shape, pointed at Malcolm's PCAP directory.",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=5.0,
+        help="Seconds between passes in --watch mode (default: 5)",
+    )
 
     args = parser.parse_args()
+
+    if args.watch:
+        if args.file or args.all or args.alerts:
+            parser.error("--watch runs the service; it cannot be combined with "
+                         "--file, --all or --alerts")
+            return 1
+        if not os.path.isdir(args.watch):
+            parser.error(f"--watch directory does not exist: {args.watch}")
+            return 1
+        return watch_capture_dir(args.watch, interval=args.interval, sanitize=args.sanitize)
 
     if args.alerts and args.all:
         parser.error("--alerts triggers one triage; it cannot be combined with --all")

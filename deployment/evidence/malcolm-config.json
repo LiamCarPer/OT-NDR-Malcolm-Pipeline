@@ -1,0 +1,81 @@
+{
+  "malcolm_dir": "/media/liamcarvajal/Storage/code/Malcolm",
+  "malcolm_revision": "e60cbd07d8f150c6126df30ae4a90c9034dca643",
+  "generator_sha256": "a3f810139b2b0fc882882ea37c8af296a01212d6f75c57be0b9eca85135d4743",
+  "claim": "every variable the fragments set is read by a component in the Malcolm checkout, and the ICS variables are the ones the Suricata generator uses to gate Modbus/DNP3 parsing and EVE output",
+  "ics_gate_variables": [
+    "DISABLE_ICS_ALL",
+    "DNP3_ENABLED",
+    "DNP3_EVE_ENABLED",
+    "DNP3_PORTS",
+    "MODBUS_ENABLED",
+    "MODBUS_EVE_ENABLED",
+    "MODBUS_PORTS",
+    "MODBUS_STREAM_DEPTH"
+  ],
+  "fragments": [
+    {
+      "fragment": "deployment/malcolm/config/suricata.env.fragment",
+      "fragment_sha256": "ed1c73ec64b500b3f4d174629c872798f722e4f5e1c9fe62a0b9c46647eb361d",
+      "variables": {
+        "SURICATA_DISABLE_ICS_ALL": "false",
+        "SURICATA_DNP3_ENABLED": "true",
+        "SURICATA_DNP3_EVE_ENABLED": "true",
+        "SURICATA_DNP3_PORTS": "20000",
+        "SURICATA_MODBUS_ENABLED": "true",
+        "SURICATA_MODBUS_EVE_ENABLED": "true",
+        "SURICATA_MODBUS_PORTS": "502"
+      },
+      "read_by": {
+        "SURICATA_DISABLE_ICS_ALL": [
+          "suricata/scripts/suricata_config_populate.py",
+          "scripts/installer/configs/configuration_items/analysis.py",
+          "scripts/installer/configs/constants/config_env_var_keys.py"
+        ],
+        "SURICATA_MODBUS_ENABLED": [
+          "suricata/scripts/suricata_config_populate.py"
+        ],
+        "SURICATA_MODBUS_EVE_ENABLED": [
+          "suricata/scripts/suricata_config_populate.py"
+        ],
+        "SURICATA_MODBUS_PORTS": [
+          "suricata/scripts/suricata_config_populate.py"
+        ],
+        "SURICATA_DNP3_ENABLED": [
+          "suricata/scripts/suricata_config_populate.py"
+        ],
+        "SURICATA_DNP3_EVE_ENABLED": [
+          "suricata/scripts/suricata_config_populate.py"
+        ],
+        "SURICATA_DNP3_PORTS": [
+          "suricata/scripts/suricata_config_populate.py"
+        ]
+      }
+    },
+    {
+      "fragment": "deployment/malcolm/config/pcap-capture.env.fragment",
+      "fragment_sha256": "7f74d2556d526307c3feb7db1d1ec9a39d7a6d8c059bed879c3eeb51cec15493",
+      "variables": {
+        "PCAP_IFACE": "lo",
+        "PCAP_ROTATE_MEGABYTES": "4096",
+        "PCAP_ROTATE_MINUTES": "10"
+      },
+      "read_by": {
+        "PCAP_IFACE": [
+          "suricata/scripts/suricata_config_populate.py",
+          "pcap-capture/scripts/supervisor.sh",
+          "zeek/scripts/docker_entrypoint.sh"
+        ],
+        "PCAP_ROTATE_MINUTES": [
+          "pcap-capture/scripts/netsniff-roll.sh",
+          "pcap-capture/scripts/supervisor.sh",
+          "arkime/scripts/docker_entrypoint.sh"
+        ],
+        "PCAP_ROTATE_MEGABYTES": [
+          "arkime/scripts/docker_entrypoint.sh"
+        ]
+      }
+    }
+  ],
+  "note": "static check; the running-instance check is in deployment/README.md"
+}

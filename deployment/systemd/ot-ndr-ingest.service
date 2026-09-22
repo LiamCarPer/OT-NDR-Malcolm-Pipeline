@@ -1,0 +1,40 @@
+[Unit]
+Description=OT NDR ingestion and forensic triage (CISA Malcolm)
+Documentation=file:///opt/ot-ndr/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Watch Malcolm's PCAP directory. Malcolm rotates live captures into it, and
+# every capture is ingested once: the watcher skips any file whose SHA-256 is
+# already in the audit log, so a restart does not re-ingest the estate.
+ExecStart=/usr/bin/python3 /opt/ot-ndr/automation/malcolm_ingest.py \
+    --watch /opt/Malcolm/pcap --interval 30
+WorkingDirectory=/opt/ot-ndr
+User=ot-ndr
+Group=ot-ndr
+
+# Environment: MALCOLM_PCAP_DIR must match the watched directory so the pipeline
+# recognises captures that are already in place. Everything else has a default.
+Environment=MALCOLM_PCAP_DIR=/opt/Malcolm/pcap
+# EnvironmentFile=-/etc/ot-ndr/ot-ndr.env
+
+# The pipeline writes reports and the audit log into the repository, so it needs
+# write access there and nowhere else. It never writes to the capture directory.
+ReadWritePaths=/opt/ot-ndr
+ProtectSystem=strict
+ProtectHome=read-only
+NoNewPrivileges=true
+PrivateTmp=true
+
+Restart=on-failure
+RestartSec=10
+# A watcher that dies quietly is worse than one that is not running: keep the
+# log in the journal and let the unit fail loudly.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ot-ndr-ingest
+
+[Install]
+WantedBy=multi-user.target

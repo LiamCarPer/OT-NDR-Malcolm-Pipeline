@@ -87,8 +87,10 @@ by a correlation rule. `Modbus Control Asset Enumeration` in
 counts distinct destinations per source inside a five-minute window, which is
 what separates an enumerating host from a polling one — a per-event signature
 cannot, because normal polling produces *more* matches than enumeration does. It
-converts to Loki, Splunk and OpenSearch queries; it is not a Suricata rule, which
-is why this table stays at zero alerts.
+converts to Loki, Splunk and OpenSearch and is proven against event sequences
+offline; it is not a Suricata rule, which is why this table stays at zero alerts,
+and its generated Loki query is not executable as produced — see the note in
+[ot-detection-engineering](https://github.com/LiamCarPer/ot-detection-engineering).
 
 ---
 
@@ -204,6 +206,9 @@ pipeline:
   the copy that ships, never to the evidence that is analysed.
 
 ```bash
+# Run as a service: ingest captures as they appear in Malcolm's directory
+python3 automation/malcolm_ingest.py --watch /opt/Malcolm/pcap --interval 30
+
 # Alert-triggered triage: the evidence file names the capture and the alert
 python3 automation/malcolm_ingest.py --alerts detection-engineering/evidence/setpoint_write.json
 
@@ -231,6 +236,9 @@ result from committed evidence; it does not run a live Malcolm instance.
 
 ## Key Capabilities Demonstrated
 
+- **Deployment:** a verified Malcolm sensor configuration, a systemd unit and a
+  Compose service, a `--watch` mode that ingests captures as they arrive and
+  never twice, and a runbook covering placement, verification and rollback.
 - **Deep Packet Inspection (DPI):** Modbus TCP function-code analysis, read/write
   classification, and setpoint-register detection.
 - **Detection Engineering:** consumes the validated ICS Suricata ruleset from
@@ -257,6 +265,11 @@ OT-NDR-Malcolm-Pipeline/
 ├── README.md                           # Master project summary
 ├── CONTRIBUTING.md                     # Contribution guidelines
 ├── assets/                             # Demo recording, renderer and its README
+├── deployment/                         # Sensor config, service units, verification
+│   ├── malcolm/                        # Env fragments and the config checker
+│   ├── systemd/                        # ot-ndr-ingest.service (watch mode)
+│   ├── docker/                         # Dockerfile and compose service
+│   └── verify_deployment.py            # Proves the config, writes evidence
 ├── automation/                         # SOAR orchestration and triage layer
 │   ├── malcolm_ingest.py               # Main orchestration engine
 │   ├── detection_quality.py            # Dispositions -> per-detection metrics
@@ -272,6 +285,24 @@ OT-NDR-Malcolm-Pipeline/
 ├── dashboards-and-visibility/          # SIEM/NDR visualisation proof
 └── incident-response/                  # NIST-aligned forensic reporting
 ```
+
+## Deployment
+
+`deployment/` turns the pipeline from something you run into something you
+install. It carries the Malcolm configuration that makes OT detection work — the
+Modbus and DNP3 **application-layer parsers**, without which the rules load, log
+nothing, and never fire — the systemd unit and Compose service for the watcher,
+and a placement runbook.
+
+The configuration is not asserted, it is checked:
+`deployment/verify_deployment.py` runs Suricata over the committed write capture
+with the parser disabled and enabled (zero alerts versus SID 9000001), and checks
+every variable the fragments set against the Malcolm checkout to confirm a
+component there actually reads it. Evidence lands in `deployment/evidence/` and
+tests fail if a fragment changes without it.
+
+See [deployment/README.md](deployment/README.md) for placement options, install,
+verification, operations and rollback — including what it does *not* prove.
 
 ## Scope and limits
 
@@ -298,9 +329,14 @@ Stated up front, because they are the interesting part:
 - **`172.21.0.1`, the baseline master, is not in the asset inventory.** It is
   reported as an unknown asset, which is an honest gap rather than a bug — and it
   is why `dpi:drift` scores zero on actionability.
-- **No live capture path is committed.** The pipeline starts from PCAPs or an
-  alert file; wiring it to a SPAN port or a Malcolm live interface is a
-  deployment step, not something this repository demonstrates.
+- **The sensor is configured, not installed.** `deployment/` carries the
+  Malcolm configuration that makes OT detection work at all (the Modbus/DNP3
+  application-layer parsers, without which the rules load and never fire), a
+  systemd unit and a Compose service for the watcher, and a placement runbook.
+  The configuration is verified against Malcolm's own components and the
+  load-bearing setting is proven against a capture; the interface path itself
+  (`PCAP_IFACE` pointing at a span or tap) is documented, not exercised, because
+  there is no plant here to mirror.
 - **Stateful detection is one rule deep.** Read-only enumeration is now covered
   by a correlation rule in `ot-detection-engineering` (distinct destinations per
   source over five minutes), but it is the only stateful detection in either

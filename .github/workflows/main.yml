@@ -35,4 +35,4 @@ jobs:
 
     - name: Lint
       run: |
-        flake8 automation/ detection-engineering/ pcaps/ assets/
+        flake8 automation/ detection-engineering/ pcaps/ assets/ deployment/

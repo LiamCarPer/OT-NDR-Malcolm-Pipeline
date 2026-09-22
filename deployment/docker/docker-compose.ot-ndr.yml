@@ -1,0 +1,37 @@
+# Run the NDR pipeline beside Malcolm.
+#
+# Malcolm is itself a Compose deployment, so the pipeline joins it rather than
+# being installed separately: it watches Malcolm's rotated captures and writes
+# its reports and audit records back into the repository checkout.
+#
+# Start Malcolm first, then:
+#
+#   cd <repo> && docker compose -f deployment/docker/docker-compose.ot-ndr.yml up -d --build
+#
+# The two paths that matter, and they must agree:
+#   - the host directory Malcolm rotates captures into (<malcolm>/pcap)
+#   - MALCOLM_PCAP_DIR, which the pipeline checks before shipping a capture
+# Watch mode passes the watched directory as the capture source, so when the two
+# match the pipeline recognises a capture that is already in place instead of
+# trying to copy it onto itself.
+
+services:
+  ot-ndr-ingest:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+    image: ot-ndr-ingest:local
+    restart: unless-stopped
+    # Run as the invoking user: the pipeline writes reports into the repo
+    # checkout, and root-owned files in a git tree are their own incident.
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      MALCOLM_PCAP_DIR: /malcolm-pcap
+    volumes:
+      # The repository itself, read-write: reports, the audit log and the metric
+      # are written inside it.
+      - ../..:/app
+      # Malcolm's rotated captures, read-only: the pipeline profiles them and
+      # never writes to the capture directory.
+      - ${MALCOLM_PCAP_HOST_DIR:-../../pcap}:/malcolm-pcap:ro
+    command: ["--watch", "/malcolm-pcap", "--interval", "30"]
