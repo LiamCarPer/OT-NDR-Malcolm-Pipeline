@@ -87,10 +87,9 @@ by a correlation rule. `Modbus Control Asset Enumeration` in
 counts distinct destinations per source inside a five-minute window, which is
 what separates an enumerating host from a polling one — a per-event signature
 cannot, because normal polling produces *more* matches than enumeration does. It
-converts to Loki, Splunk and OpenSearch and is proven against event sequences
-offline; it is not a Suricata rule, which is why this table stays at zero alerts,
-and its generated Loki query is not executable as produced — see the note in
-[ot-detection-engineering](https://github.com/LiamCarPer/ot-detection-engineering).
+converts to Loki, Splunk and OpenSearch, is proven against event sequences
+offline, and fires in a live Loki stack; it is not a Suricata rule, which is why
+this table stays at zero alerts.
 
 ---
 
